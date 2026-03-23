@@ -1,0 +1,23 @@
+title: Defense Evasion – Firewall Tampering (T1562)
+id: clif-defense-evasion-001
+status: production
+severity: critical
+category: firewall
+description: >
+  Firewall events classified as defense-evasion by the triage model,
+  typically indicating attempts to disable or modify firewall rules.
+  Maps to MITRE ATT&CK T1562 – Impair Defenses.
+tags:
+  - attack.t1562
+  - attack.defense_evasion
+detection:
+  condition: and
+  keywords:
+    - "defense-evasion"
+  clickhouse: |
+    SELECT count() > 3
+    FROM {database}.security_events
+    WHERE hostname = '{hostname}'
+      AND mitre_tactic = 'defense-evasion'
+      AND category = 'firewall'
+      AND timestamp >= now() - INTERVAL {window_minutes} MINUTE

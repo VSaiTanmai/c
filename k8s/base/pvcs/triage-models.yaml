@@ -1,0 +1,23 @@
+# =============================================================================
+# Triage Agent Model Storage — PersistentVolumeClaim
+# =============================================================================
+# Stores ML model artifacts (LightGBM ONNX, EIF pkl, feature_cols, manifest).
+# Mounted read-only at /models in the triage-agent deployment.
+# Populate by copying artifacts into the PV before deploying the agent.
+# =============================================================================
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: triage-models-pvc
+  namespace: clif
+  labels:
+    app.kubernetes.io/name: triage-agent
+    app.kubernetes.io/component: ai-agent
+    app.kubernetes.io/part-of: clif-siem
+spec:
+  accessModes:
+    - ReadOnlyMany
+  resources:
+    requests:
+      storage: 1Gi
+  storageClassName: standard

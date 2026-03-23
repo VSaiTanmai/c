@@ -1,0 +1,154 @@
+# =============================================================================
+# CLIF SIEM — Production Overlay
+# =============================================================================
+# Full-scale production deployment with:
+# - Full replica counts for HA
+# - Production resource limits
+# - Anti-affinity rules for fault tolerance
+# - PodDisruptionBudgets for zero-downtime upgrades
+# - NetworkPolicies enforced
+# =============================================================================
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: clif
+
+resources:
+  - ../../base
+  # PodDisruptionBudgets for zero-downtime rolling updates
+  - pdb.yaml
+
+labels:
+  - pairs:
+      environment: production
+    includeSelectors: false
+
+commonAnnotations:
+  clif.sih1733/deployment-tier: production
+  clif.sih1733/managed-by: kustomize-production-overlay
+
+# ── Production replica counts ────────────────────────────────────────────────
+replicas:
+  - name: redpanda
+    count: 3
+  - name: clickhouse
+    count: 2
+  - name: minio
+    count: 3
+  - name: consumer
+    count: 6     # 12 partitions / 2 per consumer = optimal
+  - name: vector
+    count: 2
+  - name: triage-agent
+    count: 2
+  - name: hunter-agent
+    count: 2
+
+patches:
+  # ── Production resource scaling ─────────────────────────────────────────────
+  - target:
+      kind: StatefulSet
+      name: redpanda
+    patch: |
+      - op: replace
+        path: /spec/template/spec/containers/0/resources/requests/cpu
+        value: "2"
+      - op: replace
+        path: /spec/template/spec/containers/0/resources/limits/cpu
+        value: "4"
+      - op: replace
+        path: /spec/template/spec/containers/0/resources/requests/memory
+        value: 4Gi
+      - op: replace
+        path: /spec/template/spec/containers/0/resources/limits/memory
+        value: 6Gi
+      - op: replace
+        path: /spec/volumeClaimTemplates/0/spec/resources/requests/storage
+        value: 100Gi
+
+  - target:
+      kind: StatefulSet
+      name: clickhouse
+    patch: |
+      - op: replace
+        path: /spec/template/spec/containers/0/resources/requests/cpu
+        value: "4"
+      - op: replace
+        path: /spec/template/spec/containers/0/resources/limits/cpu
+        value: "8"
+      - op: replace
+        path: /spec/template/spec/containers/0/resources/requests/memory
+        value: 8Gi
+      - op: replace
+        path: /spec/template/spec/containers/0/resources/limits/memory
+        value: 16Gi
+      - op: replace
+        path: /spec/volumeClaimTemplates/0/spec/resources/requests/storage
+        value: 500Gi
+
+  - target:
+      kind: StatefulSet
+      name: minio
+    patch: |
+      - op: replace
+        path: /spec/template/spec/containers/0/resources/requests/memory
+        value: 1Gi
+      - op: replace
+        path: /spec/template/spec/containers/0/resources/limits/memory
+        value: 2Gi
+      - op: replace
+        path: /spec/volumeClaimTemplates/0/spec/resources/requests/storage
+        value: 200Gi
+
+  # ── HPA production scaling targets ─────────────────────────────────────────
+  - target:
+      kind: HorizontalPodAutoscaler
+      name: consumer-hpa
+    patch: |
+      - op: replace
+        path: /spec/minReplicas
+        value: 6
+      - op: replace
+        path: /spec/maxReplicas
+        value: 24
+
+  - target:
+      kind: HorizontalPodAutoscaler
+      name: triage-agent-hpa
+    patch: |
+      - op: replace
+        path: /spec/maxReplicas
+        value: 8
+
+  # ── Pod Anti-Affinity for StatefulSets ──────────────────────────────────────
+  - target:
+      kind: StatefulSet
+      name: redpanda
+    patch: |
+      - op: add
+        path: /spec/template/spec/affinity
+        value:
+          podAntiAffinity:
+            requiredDuringSchedulingIgnoredDuringExecution:
+              - labelSelector:
+                  matchExpressions:
+                    - key: app.kubernetes.io/name
+                      operator: In
+                      values: ["redpanda"]
+                topologyKey: kubernetes.io/hostname
+
+  - target:
+      kind: StatefulSet
+      name: clickhouse
+    patch: |
+      - op: add
+        path: /spec/template/spec/affinity
+        value:
+          podAntiAffinity:
+            requiredDuringSchedulingIgnoredDuringExecution:
+              - labelSelector:
+                  matchExpressions:
+                    - key: app.kubernetes.io/name
+                      operator: In
+                      values: ["clickhouse"]
+                topologyKey: kubernetes.io/hostname

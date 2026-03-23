@@ -1,0 +1,85 @@
+# =============================================================================
+# Vector Deployment — Log Aggregation & CCS Normalization
+# =============================================================================
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: vector
+  namespace: clif
+  labels:
+    app.kubernetes.io/name: vector
+    app.kubernetes.io/component: log-aggregation
+    app.kubernetes.io/part-of: clif-siem
+    tier: compute
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: vector
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: vector
+        app.kubernetes.io/component: log-aggregation
+        tier: compute
+    spec:
+      nodeSelector:
+        clif/tier: compute
+      containers:
+        - name: vector
+          image: ghcr.io/clif-siem/vector:latest    # Built from vector/
+          ports:
+            - name: syslog-tcp
+              containerPort: 1514
+              protocol: TCP
+            - name: syslog-udp
+              containerPort: 1514
+              protocol: UDP
+            - name: api
+              containerPort: 8686
+            - name: http-ingest
+              containerPort: 8687
+            - name: statsd
+              containerPort: 8125
+              protocol: UDP
+            - name: prom-exporter
+              containerPort: 9598
+          env:
+            - name: VECTOR_KAFKA_BROKERS
+              value: "redpanda-0.redpanda-headless.clif.svc.cluster.local:9092,redpanda-1.redpanda-headless.clif.svc.cluster.local:9092,redpanda-2.redpanda-headless.clif.svc.cluster.local:9092"
+            - name: VECTOR_LOG
+              value: info
+            - name: VECTOR_THREADS
+              value: "4"
+          volumeMounts:
+            - name: config
+              mountPath: /etc/vector/vector.yaml
+              subPath: vector.yaml
+            - name: data
+              mountPath: /var/lib/vector
+          resources:
+            requests:
+              cpu: "1"
+              memory: 1Gi
+            limits:
+              cpu: "4"
+              memory: 4Gi
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: api
+            periodSeconds: 15
+            timeoutSeconds: 5
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: api
+            initialDelaySeconds: 10
+            periodSeconds: 15
+      volumes:
+        - name: config
+          configMap:
+            name: vector-config
+        - name: data
+          emptyDir:
+            sizeLimit: 2Gi

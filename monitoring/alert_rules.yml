@@ -1,0 +1,180 @@
+# =============================================================================
+# CLIF SIEM — Prometheus Alerting Rules (Production Grade)
+# =============================================================================
+groups:
+  # ── Infrastructure Health ─────────────────────────────────────────────────
+  - name: clif_infrastructure
+    interval: 30s
+    rules:
+      - alert: ServiceDown
+        expr: up == 0
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Service {{ $labels.job }} is down"
+          description: "{{ $labels.job }} on {{ $labels.instance }} has been unreachable for 2+ minutes."
+
+      - alert: HighCPUUsage
+        expr: rate(process_cpu_seconds_total[5m]) > 0.8
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High CPU usage on {{ $labels.job }}"
+          description: "CPU usage has been above 80% for 5+ minutes on {{ $labels.instance }}."
+
+      - alert: HighMemoryUsage
+        expr: process_resident_memory_bytes / (1024^3) > 6
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High memory usage on {{ $labels.job }}"
+          description: "Memory usage is {{ $value | humanize }}GB on {{ $labels.instance }}."
+
+  # ── ClickHouse ────────────────────────────────────────────────────────────
+  - name: clif_clickhouse
+    interval: 30s
+    rules:
+      - alert: ClickHouseReplicationLag
+        expr: ClickHouseAsyncMetrics_ReplicasMaxAbsoluteDelay > 300
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: "ClickHouse replication lag > 5min"
+          description: "Replication delay is {{ $value }}s on {{ $labels.instance }}."
+
+      - alert: ClickHouseQuerySlowdown
+        expr: rate(ClickHouseProfileEvents_QueryTimeMicroseconds[5m]) / rate(ClickHouseProfileEvents_Query[5m]) > 5000000
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "ClickHouse average query time > 5s"
+          description: "Average query time has exceeded 5 seconds on {{ $labels.instance }}."
+
+      - alert: ClickHouseInsertErrors
+        expr: rate(ClickHouseProfileEvents_FailedInsertQuery[5m]) > 0.1
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: "ClickHouse INSERT errors detected"
+          description: "Failed INSERT rate is {{ $value }}/s on {{ $labels.instance }}."
+
+      - alert: ClickHouseDiskUsageHigh
+        expr: ClickHouseAsyncMetrics_DiskUsed_default / ClickHouseAsyncMetrics_DiskTotal_default > 0.85
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "ClickHouse disk usage > 85%"
+          description: "Disk usage is {{ $value | humanizePercentage }} on {{ $labels.instance }}."
+
+      - alert: ClickHouseMaxPartsError
+        expr: ClickHouseAsyncMetrics_MaxPartCountForPartition > 200
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: "ClickHouse too many parts"
+          description: "Max parts per partition is {{ $value }} on {{ $labels.instance }}. Risk of 'too many parts' error."
+
+  # ── Redpanda / Kafka ──────────────────────────────────────────────────────
+  - name: clif_redpanda
+    interval: 30s
+    rules:
+      - alert: RedpandaConsumerLag
+        expr: redpanda_kafka_consumer_group_lag_sum > 100000
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Consumer group lag > 100K messages"
+          description: "Consumer group {{ $labels.group }} has {{ $value }} messages lag."
+
+      - alert: RedpandaConsumerLagCritical
+        expr: redpanda_kafka_consumer_group_lag_sum > 1000000
+        for: 3m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Consumer group lag > 1M messages"
+          description: "Consumer group {{ $labels.group }} has {{ $value }} messages lag — risk of data processing backlog."
+
+      - alert: RedpandaUnderReplicatedPartitions
+        expr: redpanda_kafka_under_replicated_replicas > 0
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Under-replicated partitions detected"
+          description: "{{ $value }} under-replicated partitions on {{ $labels.instance }}."
+
+      - alert: RedpandaDiskUsageHigh
+        expr: redpanda_storage_disk_total_bytes > 0 and (redpanda_storage_disk_total_bytes - redpanda_storage_disk_free_bytes) / redpanda_storage_disk_total_bytes > 0.80
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Redpanda disk usage > 80%"
+          description: "Storage utilization is high on {{ $labels.instance }}."
+
+  # ── MinIO ─────────────────────────────────────────────────────────────────
+  - name: clif_minio
+    interval: 60s
+    rules:
+      - alert: MinIODiskOffline
+        expr: minio_cluster_disk_offline_total > 0
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: "MinIO disk offline"
+          description: "{{ $value }} disk(s) are offline in the MinIO cluster."
+
+      - alert: MinIODiskUsageHigh
+        expr: minio_cluster_capacity_usable_free_bytes / minio_cluster_capacity_usable_total_bytes < 0.15
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "MinIO disk usage > 85%"
+          description: "Less than 15% usable capacity remaining in MinIO cluster."
+
+  # ── Vector Pipeline ──────────────────────────────────────────────────────
+  - name: clif_vector
+    interval: 30s
+    rules:
+      - alert: VectorHighErrorRate
+        expr: rate(vector_component_errors_total[5m]) > 1
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Vector pipeline error rate > 1/s"
+          description: "Component {{ $labels.component_id }} is generating errors at {{ $value }}/s."
+
+      - alert: VectorBufferFull
+        expr: vector_buffer_events{component_type="sink"} > 50000
+        for: 3m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Vector sink buffer is filling up"
+          description: "Buffer for {{ $labels.component_id }} has {{ $value }} events pending."
+
+  # ── LanceDB Service ─────────────────────────────────────────────────────
+  - name: clif_lancedb
+    interval: 60s
+    rules:
+      - alert: LanceDBSearchLatencyHigh
+        expr: histogram_quantile(0.95, rate(http_request_duration_seconds_bucket{handler="/search"}[5m])) > 2
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "LanceDB search p95 latency > 2s"
+          description: "Search latency is {{ $value }}s — consider scaling or optimizing embeddings."

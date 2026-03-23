@@ -1,0 +1,25 @@
+title: IDS/IPS Network Attack – Known Attack Category
+id: clif-ids-attack-001
+status: production
+severity: high
+category: ids_ips
+description: >
+  IDS/IPS alerts matching well-known attack categories from the
+  KDD/NSL dataset taxonomy (neptune, smurf, teardrop, back, etc.)
+  or categories parsed from Snort/Suricata-style logs.
+tags:
+  - attack.t1498
+  - attack.impact
+detection:
+  condition: and
+  clickhouse: |
+    SELECT count() > 5
+    FROM {database}.security_events
+    WHERE hostname = '{hostname}'
+      AND source = 'ids_ips'
+      AND category IN (
+          'neptune','smurf','back','teardrop','buffer_overflow','land',
+          'pod','warezclient','guess_passwd','ipsweep','portsweep',
+          'satan','nmap'
+      )
+      AND timestamp >= now() - INTERVAL {window_minutes} MINUTE

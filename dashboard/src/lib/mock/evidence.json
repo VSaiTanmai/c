@@ -1,0 +1,19 @@
+{
+  "batches": [
+    {"id": "BATCH-20260211-001", "timestamp": "2026-02-11T10:30:00Z", "eventCount": 48320, "merkleRoot": "a4f8e2c1d9b3f7a6e5c4d8b2a1f9e3c7d6b5a4f8e2c1d9b3f7a6e5c4d8b2a1f9", "txId": "0xf4a8e2c1d9b3...7a6e", "blockNumber": 847291, "status": "Verified"},
+    {"id": "BATCH-20260211-002", "timestamp": "2026-02-11T10:00:00Z", "eventCount": 51200, "merkleRoot": "b5e3d2f1a8c4e7b6d5f4a3e2c1b9d8f7a6c5b4e3d2f1a8c4e7b6d5f4a3e2c1b9", "txId": "0xe3d2f1a8c4b5...6d5f", "blockNumber": 847284, "status": "Verified"},
+    {"id": "BATCH-20260211-003", "timestamp": "2026-02-11T09:30:00Z", "eventCount": 45890, "merkleRoot": "c6d4e3f2b9a5d8c7e6f5b4a3d2e1c9b8a7f6e5d4c3b2a1f9e8d7c6b5a4f3e2d1", "txId": "0xd4e3f2b9a5c6...7e6f", "blockNumber": 847277, "status": "Verified"},
+    {"id": "BATCH-20260211-004", "timestamp": "2026-02-11T09:00:00Z", "eventCount": 52100, "merkleRoot": "d7f5e4a3c8b6e9d8f7a6c5b4e3d2f1a9c8b7a6f5e4d3c2b1a9f8e7d6c5b4a3f2", "txId": "0xa3c8b6e9d7f5...6c5b", "blockNumber": 847270, "status": "Verified"},
+    {"id": "BATCH-20260211-005", "timestamp": "2026-02-11T08:30:00Z", "eventCount": 47650, "merkleRoot": "e8a6f5b4d9c7a8e7f6b5c4d3e2f1a9b8c7d6e5f4a3b2c1d9e8f7a6b5c4d3e2f1", "txId": "0xb4d9c7a8e8a6...5c4d", "blockNumber": 847263, "status": "Verified"},
+    {"id": "BATCH-20260211-006", "timestamp": "2026-02-11T08:00:00Z", "eventCount": 50430, "merkleRoot": "f9b7a6c5e8d4f9b8a7c6d5e4f3b2a1c9d8e7f6a5b4c3d2e1f9a8b7c6d5e4f3b2", "txId": "0xc5e8d4f9b7a6...6d5e", "blockNumber": 847256, "status": "Verified"},
+    {"id": "BATCH-20260210-001", "timestamp": "2026-02-10T23:30:00Z", "eventCount": 42180, "merkleRoot": "a1c9d8e7f6b5a4c3d2e1f9b8a7c6d5e4f3a2b1c9d8e7f6a5b4c3d2e1f9a8b7c6", "txId": "0xd8e7f6b5a1c9...5e4f", "blockNumber": 847210, "status": "Verified"},
+    {"id": "BATCH-20260210-002", "timestamp": "2026-02-10T23:00:00Z", "eventCount": 49870, "merkleRoot": "b2d8e9f7a6c5b4d3e2f1a9c8b7a6f5e4d3c2b1a9f8e7d6c5b4a3f2e1d9c8b7a6", "txId": "0xe9f7a6c5b2d8...4d3c", "blockNumber": 847203, "status": "Verified"}
+  ],
+  "summary": {
+    "totalAnchored": 4287400,
+    "totalBatches": 8,
+    "verificationRate": 100,
+    "avgBatchSize": 48455,
+    "chainLength": 847291
+  }
+}

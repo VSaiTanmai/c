@@ -1,0 +1,24 @@
+title: Cisco IOS Brute Force Login Attempt
+id: cisco-ios-brute-001
+status: production
+severity: high
+category: cisco
+description: >
+  Multiple failed SSH/Telnet login attempts detected on a Cisco IOS device
+  within the investigation window.
+tags:
+  - attack.t1110
+  - attack.credential_access
+detection:
+  condition: or
+  keywords:
+    - "login failed"
+    - "authentication failure"
+    - "% Login invalid"
+  clickhouse: |
+    SELECT count() > 5
+    FROM {database}.network_events
+    WHERE hostname = '{hostname}'
+      AND toString(src_ip) = '{source_ip}'
+      AND detection_rule ILIKE '%login%fail%'
+      AND timestamp >= now() - INTERVAL {window_minutes} MINUTE

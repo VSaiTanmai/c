@@ -1,0 +1,856 @@
+# =============================================================================
+# CLIF Vector Pipeline v2 — Full Production Path (Vector → Redpanda → CH)
+# =============================================================================
+#
+# Architecture: Sources → mega_transform → route_by_type → Kafka sinks
+#               Consumer reads from Redpanda → batch inserts to ClickHouse
+#
+# Performance optimizations over v1:
+#   1. Single mega-transform (2 hops total, was 6) — saves ~12µs/event
+#   2. Pre-classification fast path — skips regex for pre-labeled events
+#   3. 512-byte prefix regex scan — faster security classification
+#   4. No dedup in Vector — push to ClickHouse FINAL if needed
+#   5. All 4 event types route through Redpanda (production path)
+#   6. Consumer batch-inserts to ClickHouse (native TCP, columnar)
+#   7. event_id generated in VRL (UUID v4) for CH ↔ AI linkage
+#
+# Delivery guarantees (tuned for throughput, v2.1):
+#   • acks=1 (leader-only confirmation — lower latency)
+#   • enable.idempotence=false (at-least-once; CH dedup via ReplacingMergeTree)
+#   • acknowledgements=false (skip per-event ack tracking in Vector)
+#   • linger.ms=5 (micro-batch for throughput without latency hit)
+#   • when_full=block (backpressure, never silently drop events)
+#   • 10 retries with exponential backoff (200ms → 10s cap)
+#   • Consumer: manual offset commit only after successful CH flush
+#   • Consumer: 5 retries on CH insert with reconnect + DLQ fallback
+#   NOTE: To restore exactly-once, set acks=-1, enable.idempotence=true,
+#         acknowledgements.enabled=true in sinks + global settings.
+#
+# Transform chain (2 hops):
+#   Sources → mega_transform → route_by_type → Kafka sinks
+#
+# =============================================================================
+
+# ── Global Settings ──────────────────────────────────────────────────────────
+
+data_dir: /var/lib/vector
+log_schema:
+  host_key: "host"
+  message_key: "message"
+  source_type_key: "source_type"
+  timestamp_key: "timestamp"
+
+# OPT #4: Disabled end-to-end ack tracking — saves atomic refcount + hashmap
+# per event. Buffer backpressure (when_full: block) still prevents data loss.
+acknowledgements:
+  enabled: false
+
+# ── API / Health ─────────────────────────────────────────────────────────────
+
+api:
+  enabled: true
+  address: "0.0.0.0:8686"
+  playground: false
+
+# =============================================================================
+#                              SOURCES
+# =============================================================================
+
+sources:
+
+  # ── Syslog (RFC 5424 + RFC 3164) ──────────────────────────────────────────
+  syslog_tcp:
+    type: syslog
+    address: "0.0.0.0:1514"
+    mode: tcp
+    max_length: 102400
+    tls:
+      enabled: false
+    connection_limit: 10000
+    decoding:
+      codec: bytes
+
+  # OPT #5: syslog_udp, http_json removed — 0 events processed, saves tokio tasks + sockets
+  # Re-enable when needed:
+  # syslog_udp:
+  #   type: syslog
+  #   address: "0.0.0.0:1514"
+  #   mode: udp
+  #   max_length: 65536
+  #   decoding:
+  #     codec: bytes
+  # http_json:
+  #   type: http_server
+  #   address: "0.0.0.0:8687"
+  #   encoding: json
+  #   path: "/v1/logs"
+  #   strict_path: false
+
+  # ── TCP NDJSON Socket (high-throughput, no HTTP overhead) ─────────────────
+  tcp_json:
+    type: socket
+    mode: tcp
+    address: "0.0.0.0:9514"
+    decoding:
+      codec: json
+    max_length: 1048576
+    shutdown_timeout_secs: 30
+    receive_buffer_bytes: 8388608
+
+  # OPT #5: docker_logs, file_logs, journald, statsd_metrics removed — 0 events, saves
+  # tokio tasks, inotify watchers, Docker API polling, journal handles, UDP socket.
+  # Re-enable when deploying to environments that use these sources.
+
+  # ── Vector Internal Metrics ──────────────────────────────────────────────
+  internal_metrics:
+    type: internal_metrics
+    scrape_interval_secs: 15
+
+  # ── Vector Internal Logs ─────────────────────────────────────────────────
+  internal_logs:
+    type: internal_logs
+
+
+# =============================================================================
+#                     TRANSFORMS (2 HOPS ONLY)
+# =============================================================================
+#
+# Transform chain:
+#   Sources → mega_transform (single VRL) → route_by_type → sinks
+#
+# mega_transform replaces 6 previous transforms:
+#   route_http_source + route_windows_events + parse_and_structure
+#   + classify_format_route + route_by_type (routing logic embedded)
+#
+# VRL compiles to native Rust. Regex literals compile at config load time.
+# All (?i) patterns use Aho-Corasick multi-pattern matching internally.
+# =============================================================================
+
+transforms:
+
+  # ══════════════════════════════════════════════════════════════════════════
+  # MEGA TRANSFORM: Parse + Classify + Normalize + Format
+  # ══════════════════════════════════════════════════════════════════════════
+  mega_transform:
+    type: remap
+    inputs:
+      - "syslog_tcp"
+      - "tcp_json"
+    source: |
+      # ══════════════════════════════════════════════════════════════════
+      # PRE-CLASSIFICATION CHECK
+      # Events arriving with a valid clif_event_type (from enriched
+      # agents, Windows agent, etc.) skip ALL regex-based classification.
+      # Saves ~18µs per pre-classified event.
+      # ══════════════════════════════════════════════════════════════════
+      _skip_classify = false
+      if exists(.clif_event_type) && is_string(.clif_event_type) {
+        _ct = to_string!(.clif_event_type)
+        if _ct == "security" || _ct == "process" || _ct == "network" || _ct == "raw" {
+          _skip_classify = true
+        }
+      }
+
+      # ══════════════════════════════════════════════════════════════════
+      # SECTION A: TIMESTAMP NORMALIZATION (always runs)
+      # ══════════════════════════════════════════════════════════════════
+      if !is_timestamp(.timestamp) {
+        if is_string(.timestamp) {
+          _pts, err = parse_timestamp(to_string!(.timestamp), format: "%+")
+          if err == null {
+            .timestamp = _pts
+          } else {
+            .timestamp = now()
+          }
+        } else {
+          .timestamp = now()
+        }
+      }
+
+      # ══════════════════════════════════════════════════════════════════
+      # SECTION B: PARSE & NORMALIZE
+      # Pre-classified events get safe defaults; standard events get
+      # full parsing (JSON, hostname, IP, level, source, message body).
+      # ══════════════════════════════════════════════════════════════════
+
+      # Preserve source type early
+      _src_type = if exists(.source_type) { to_string!(.source_type) } else { "unknown" }
+
+      # Define message variables in top-level scope (VRL requires this)
+      _msg = if is_string(.message) { to_string!(.message) } else { "" }
+      _msg_body = _msg
+
+      # ── Original log level: SOURCE system severity, NOT Vector's classification ─
+      # Set as an event FIELD (not VRL variable) so it's visible in Section E
+      # output formatting. Initialized from raw .level/.severity BEFORE Section C
+      # classification can overwrite .severity. Pre-classified events get their
+      # level from the incoming fields.
+      .original_log_level = 0
+      if exists(.level) {
+        _oll_raw = upcase(to_string!(.level))
+        if _oll_raw == "CRITICAL" || _oll_raw == "ALERT" || _oll_raw == "EMERG" || _oll_raw == "CRIT" { .original_log_level = 4 } else if _oll_raw == "ERROR" || _oll_raw == "ERR" { .original_log_level = 3 } else if _oll_raw == "WARNING" || _oll_raw == "WARN" { .original_log_level = 2 } else if _oll_raw == "DEBUG" || _oll_raw == "TRACE" { .original_log_level = 0 } else { .original_log_level = 0 }
+      } else if exists(.severity) {
+        _oll_sev, err = to_int(.severity)
+        if err == null { .original_log_level = if _oll_sev > 4 { 4 } else if _oll_sev < 0 { 0 } else { _oll_sev } }
+      } else if exists(.priority) {
+        _oll_pri, err = to_int(.priority)
+        if err == null { .original_log_level = if _oll_pri <= 2 { 4 } else if _oll_pri == 3 { 3 } else if _oll_pri == 4 { 2 } else { 0 } }
+      }
+
+      if !_skip_classify {
+        # ── JSON parse: ONLY if message looks like JSON ────────────────
+        if is_string(.message) {
+          _ms = to_string!(.message)
+          if starts_with(_ms, "{") || starts_with(_ms, "[") {
+            _parsed, err = parse_json(_ms)
+            if err == null && is_object(_parsed) {
+              . = merge!(., _parsed)
+            }
+          }
+        }
+
+        # ── Hostname normalization ─────────────────────────────────────
+        if exists(.hostname) && is_string(.hostname) {
+          .hostname = to_string!(.hostname)
+        } else if exists(.host) {
+          .hostname = to_string!(.host)
+        } else if exists(.container_name) {
+          .hostname = to_string!(.container_name)
+        } else if exists(._HOSTNAME) {
+          .hostname = to_string!(._HOSTNAME)
+        } else {
+          .hostname = "unknown"
+        }
+
+        # ── Extract IP: ONLY if no IP field already exists ─────────────
+        if !exists(.ip_address) && !exists(.src_ip) && !exists(.source_ip) {
+          if is_string(.message) {
+            _ipm, err = parse_regex(to_string!(.message), r'\b(?P<ip>\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})\b')
+            if err == null { .ip_address = _ipm.ip }
+          }
+        }
+
+        # ── Normalize severity/level (fast-path common values) ─────────
+        if !exists(.level) {
+          if exists(.severity) {
+            .level = to_string!(.severity)
+          } else if exists(.priority) {
+            .level = to_string!(.priority)
+          } else if exists(.PRIORITY) {
+            .level = to_string!(.PRIORITY)
+          } else {
+            .level = "INFO"
+          }
+        }
+        .level = upcase(to_string!(.level))
+
+        # Fast path: skip complex normalization for canonical values
+        if !match(.level, r'^(?:CRITICAL|ERROR|WARNING|INFO|DEBUG)$') {
+          if match(.level, r'^[0-7]$') {
+            if .level == "0" || .level == "1" || .level == "2" {
+              .level = "CRITICAL"
+            } else if .level == "3" {
+              .level = "ERROR"
+            } else if .level == "4" {
+              .level = "WARNING"
+            } else if .level == "5" || .level == "6" {
+              .level = "INFO"
+            } else {
+              .level = "DEBUG"
+            }
+          } else if match(.level, r'(?i)EMERG|CRIT|ALERT') {
+            .level = "CRITICAL"
+          } else if match(.level, r'(?i)ERR') {
+            .level = "ERROR"
+          } else if match(.level, r'(?i)WARN') {
+            .level = "WARNING"
+          } else if match(.level, r'(?i)DEBUG|TRACE') {
+            .level = "DEBUG"
+          } else {
+            .level = "INFO"
+          }
+        }
+
+        # ── Update original_log_level with Section B's normalized .level ──
+        # The top-level scope pre-computed .original_log_level from raw fields.
+        # Now that Section B has canonicalized .level, update with the clean value.
+        .original_log_level = if .level == "CRITICAL" { 4 } else if .level == "ERROR" { 3 } else if .level == "WARNING" { 2 } else if .level == "DEBUG" { 0 } else { 0 }
+
+        # ── Normalize source ───────────────────────────────────────────
+        if exists(.appname) && to_string!(.appname) != "" {
+          .source = to_string!(.appname)
+        } else if exists(._SYSTEMD_UNIT) {
+          .source = to_string!(._SYSTEMD_UNIT)
+        } else if exists(.container_name) {
+          .source = to_string!(.container_name)
+        } else if exists(.source_type) {
+          .source = to_string!(.source_type)
+        } else if exists(.source) {
+          .source = to_string!(.source)
+        } else {
+          .source = "vector"
+        }
+
+        # ── Ensure message is string ───────────────────────────────────
+        if !is_string(.message) {
+          .message = encode_json(.)
+        }
+        _msg = to_string!(.message)
+
+        # ── Message body extraction (skip for structured sources) ──────
+        _msg_body = _msg
+        if _src_type == "syslog" || _src_type == "file" || _src_type == "journald" {
+          if match(_msg_body, r'^\w{3}\s+\d') {
+            _sm, err = parse_regex(_msg_body, r'^(?:\w{3}\s+\d{1,2}\s+[\d:]+\s+\S+\s+\S+(?:\[\d+\])?:\s*)(?P<body>.*)')
+            if err == null { _msg_body = _sm.body }
+          } else if match(_msg_body, r'^\d{4}[-/]') {
+            _im2, err = parse_regex(_msg_body, r'^(?:\d{4}[-/]\d{2}[-/]\d{2}[T ]\d{2}:\d{2}:\d{2}\S*\s+\S+[\s:]+)(?P<body>.*)')
+            if err == null { _msg_body = _im2.body }
+          }
+        }
+
+      } else {
+        # ── Pre-classified: safe defaults for fields that may be missing ──
+        _msg = if is_string(.message) { to_string!(.message) } else { "" }
+        _msg_body = _msg
+        if !exists(.hostname) { .hostname = "unknown" }
+        if !exists(.level) { .level = "INFO" } else { .level = upcase(to_string!(.level)) }
+        if !exists(.source) { .source = "vector" }
+      }
+
+
+      # ══════════════════════════════════════════════════════════════════
+      # SECTION C: CLASSIFICATION (skip entirely for pre-classified)
+      # ══════════════════════════════════════════════════════════════════
+
+      if !_skip_classify {
+        .clif_event_type = "raw"
+
+        # ── Phase 0: Label-based fast path (O(1) field checks) ─────────
+        if exists(.attack_cat) {
+          _ac = to_string!(.attack_cat)
+          if _ac != "" && _ac != "Normal" && _ac != "normal" {
+            .clif_event_type = "security"
+            .category = downcase(_ac)
+            .severity = 3
+            .description = _msg
+            .mitre_tactic = "unknown"
+            .mitre_technique = ""
+          }
+        } else if exists(.Label) || exists(.label) {
+          _lr = if exists(.Label) { to_string!(.Label) } else { to_string!(.label) }
+          _l = downcase(_lr)
+          if _l != "" && _l != "benign" && _l != "normal" && _l != "0" {
+            .clif_event_type = "security"
+            .category = if exists(.attack_type) { downcase(to_string!(.attack_type)) } else { _l }
+            .severity = 3
+            .description = _msg
+            .mitre_tactic = "unknown"
+            .mitre_technique = ""
+          }
+        }
+
+        # ── Phase 1: Security regex (512-byte prefix scan) ─────────────
+        # Direct pattern match — most common patterns first for early exit.
+        # Eliminates redundant Aho-Corasick guard regex (~1µs saved for 60% of events).
+        if .clif_event_type == "raw" {
+          _scan = slice!(_msg, 0, 512)
+
+          if match(_scan, r'(?i)failed password|authentication failure|invalid user|login failed|access denied|account locked|brute force') {
+            .clif_event_type = "security"
+            .category = "auth"
+            .severity = 3
+            .description = _msg
+            .mitre_tactic = "credential-access"
+            .mitre_technique = "T1078"
+            if match(_scan, r'(?i)brute force|account locked') {
+              .severity = 4
+              .mitre_technique = "T1110"
+            }
+
+          } else if match(_scan, r'(?i)accepted password|accepted publickey|session opened|login successful') {
+            .clif_event_type = "security"
+            .category = "auth"
+            .severity = 1
+            .description = _msg
+            .mitre_tactic = "initial-access"
+            .mitre_technique = "T1078"
+
+          } else if match(_scan, r'(?i)malware|virus|trojan|ransomware|cryptominer|reverse shell|c2 beacon') {
+            .clif_event_type = "security"
+            .category = "malware"
+            .severity = 4
+            .description = _msg
+            .mitre_tactic = "execution"
+            .mitre_technique = "T1059"
+
+          } else if match(_scan, r'(?i)exfiltration|data leak|large upload|unusual transfer') {
+            .clif_event_type = "security"
+            .category = "exfiltration"
+            .severity = 4
+            .description = _msg
+            .mitre_tactic = "exfiltration"
+            .mitre_technique = "T1041"
+
+          } else if match(_scan, r'(?i)port scan|syn flood|ddos|dns tunnel|lateral movement') {
+            .clif_event_type = "security"
+            .category = "network-attack"
+            .severity = 3
+            .description = _msg
+            .mitre_tactic = "discovery"
+            .mitre_technique = "T1046"
+            if match(_scan, r'(?i)lateral movement') {
+              .mitre_tactic = "lateral-movement"
+              .mitre_technique = "T1021"
+            }
+            if match(_scan, r'(?i)dns tunnel') {
+              .mitre_tactic = "command-and-control"
+              .mitre_technique = "T1071.004"
+            }
+
+          } else if match(_scan, r'(?i)firewall|iptables|nftables') {
+            .clif_event_type = "security"
+            .category = "firewall"
+            .severity = 2
+            .description = _msg
+            .mitre_tactic = "defense-evasion"
+            .mitre_technique = "T1562"
+          }
+        }
+
+        # ── Phase 2: Field-based + fallback classification ─────────────
+        if .clif_event_type == "raw" {
+          _scan2 = slice!(_msg, 0, 512)
+
+          if match(_scan2, r'(?i)\bsudo[\s:\[]\b|privilege.escalat|\bsu:\s') {
+            .clif_event_type = "security"
+            .category = "privilege-escalation"
+            .severity = 2
+            .description = _msg
+            .mitre_tactic = "privilege-escalation"
+            .mitre_technique = "T1548"
+
+          } else if match(_scan2, r'(?i)blocked.*connection|connection.*blocked') {
+            .clif_event_type = "security"
+            .category = "firewall"
+            .severity = 2
+            .description = _msg
+            .mitre_tactic = "defense-evasion"
+            .mitre_technique = "T1562"
+
+          } else if exists(.pid) || exists(.PID) || exists(._PID) {
+            .clif_event_type = "process"
+
+          } else if exists(.src_ip) || exists(.dst_ip) || exists(.src_port) || exists(.dst_port) || exists(.source_ip) || exists(.dest_ip) {
+            .clif_event_type = "network"
+
+          } else if match(_scan2, r'(?i)(?:exec.*pid|process started|command=|comm=)') {
+            .clif_event_type = "process"
+
+          } else if match(_scan2, r'(?i)(?:tcp|udp)\s+(?:connect|listen|accept)|connection\s+\S*\s*(?:port|:)') {
+            .clif_event_type = "network"
+          }
+        }
+
+        # ── Default severity for non-security events ───────────────────
+        if .clif_event_type != "security" {
+          if .level == "CRITICAL" {
+            .severity = 4
+          } else if .level == "ERROR" {
+            .severity = 3
+          } else if .level == "WARNING" {
+            .severity = 2
+          } else {
+            .severity = 0
+          }
+        }
+      }
+
+
+      # ══════════════════════════════════════════════════════════════════
+      # SECTION D: FIELD NORMALIZATION (process / network)
+      # Runs for both pre-classified and newly-classified events.
+      # ══════════════════════════════════════════════════════════════════
+
+      if .clif_event_type == "process" {
+        _pid_raw = if exists(.pid) { .pid } else if exists(.PID) { .PID } else if exists(._PID) { ._PID } else { 0 }
+        .pid, err = to_int(_pid_raw)
+        if err != null { .pid = 0 }
+
+        _ppid_raw = if exists(.ppid) { .ppid } else if exists(.PPID) { .PPID } else { 0 }
+        .ppid, err = to_int(_ppid_raw)
+        if err != null { .ppid = 0 }
+
+        _uid_raw = if exists(.uid) { .uid } else if exists(.UID) { .UID } else if exists(._UID) { ._UID } else { 0 }
+        .uid, err = to_int(_uid_raw)
+        if err != null { .uid = 0 }
+
+        _gid_raw = if exists(.gid) { .gid } else if exists(.GID) { .GID } else { 0 }
+        .gid, err = to_int(_gid_raw)
+        if err != null { .gid = 0 }
+
+        .binary_path = if exists(.binary_path) { to_string!(.binary_path) } else if exists(.exe) { to_string!(.exe) } else if exists(._EXE) { to_string!(._EXE) } else if exists(.COMM) { to_string!(.COMM) } else { "" }
+        .arguments = if exists(.arguments) { to_string!(.arguments) } else if exists(.cmdline) { to_string!(.cmdline) } else if exists(._CMDLINE) { to_string!(._CMDLINE) } else { "" }
+        .cwd = if exists(.cwd) { to_string!(.cwd) } else { "" }
+
+        _ec_raw = if exists(.exit_code) { .exit_code } else if exists(.EXIT_STATUS) { .EXIT_STATUS } else { -1 }
+        .exit_code, err = to_int(_ec_raw)
+        if err != null { .exit_code = -1 }
+
+        .proc_container_id = if exists(.container_id) { to_string!(.container_id) } else if exists(.CONTAINER_ID) { to_string!(.CONTAINER_ID) } else { "" }
+        .pod_name = if exists(.pod_name) { to_string!(.pod_name) } else { "" }
+        .ns = if exists(.namespace) { to_string!(.namespace) } else { "" }
+        .syscall = if exists(.syscall) { to_string!(.syscall) } else { "" }
+
+      } else if .clif_event_type == "network" {
+        _raw_src = if exists(.src_ip) { to_string!(.src_ip) } else if exists(.source_ip) { to_string!(.source_ip) } else if exists(.client_ip) { to_string!(.client_ip) } else { "0.0.0.0" }
+        if !match(_raw_src, r'^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$') {
+          _raw_src = "0.0.0.0"
+        }
+        .src_ip = _raw_src
+
+        _raw_dst = if exists(.dst_ip) { to_string!(.dst_ip) } else if exists(.dest_ip) { to_string!(.dest_ip) } else if exists(.destination_ip) { to_string!(.destination_ip) } else if exists(.server_ip) { to_string!(.server_ip) } else { "0.0.0.0" }
+        if !match(_raw_dst, r'^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$') {
+          _raw_dst = "0.0.0.0"
+        }
+        .dst_ip = _raw_dst
+
+        _sp = if exists(.src_port) { .src_port } else if exists(.source_port) { .source_port } else if exists(.client_port) { .client_port } else { 0 }
+        .src_port, err = to_int(_sp)
+        if err != null { .src_port = 0 }
+        if .src_port < 0 || .src_port > 65535 { .src_port = 0 }
+
+        _dp = if exists(.dst_port) { .dst_port } else if exists(.dest_port) { .dest_port } else if exists(.destination_port) { .destination_port } else if exists(.server_port) { .server_port } else { 0 }
+        .dst_port, err = to_int(_dp)
+        if err != null { .dst_port = 0 }
+        if .dst_port < 0 || .dst_port > 65535 { .dst_port = 0 }
+
+        _proto_raw = if exists(.protocol) { to_string!(.protocol) } else if exists(.proto) { to_string!(.proto) } else { "TCP" }
+        .protocol = upcase(_proto_raw)
+
+        .direction = if exists(.direction) { to_string!(.direction) } else { "outbound" }
+
+        _bs = if exists(.bytes_sent) { .bytes_sent } else if exists(.bytes_out) { .bytes_out } else { 0 }
+        .bytes_sent, err = to_int(_bs)
+        if err != null { .bytes_sent = 0 }
+
+        _br = if exists(.bytes_received) { .bytes_received } else if exists(.bytes_in) { .bytes_in } else { 0 }
+        .bytes_received, err = to_int(_br)
+        if err != null { .bytes_received = 0 }
+
+        _dur = if exists(.duration_ms) { .duration_ms } else if exists(.duration) { .duration } else { 0 }
+        .duration_ms, err = to_int(_dur)
+        if err != null { .duration_ms = 0 }
+
+        _p_v = if exists(.pid) { .pid } else { 0 }
+        .pid, err = to_int(_p_v)
+        if err != null { .pid = 0 }
+
+        .dns_query = if exists(.dns_query) { to_string!(.dns_query) } else if exists(.query) { to_string!(.query) } else { "" }
+        .geo_country = if exists(.geo_country) { to_string!(.geo_country) } else if exists(.country) { to_string!(.country) } else { "" }
+      }
+
+
+      # ══════════════════════════════════════════════════════════════════
+      # SECTION E: METADATA + OUTPUT FORMATTING
+      # Builds clean ClickHouse-schema-compatible event objects.
+      # Object rebuild strips all unexpected fields for security.
+      # ══════════════════════════════════════════════════════════════════
+
+      # ── Build metadata map (full for security, minimal for others) ──
+      _metadata = { "original_source_type": _src_type }
+      if .clif_event_type == "security" {
+        if exists(.user_id) { _metadata.user_id = to_string!(.user_id) }
+        if exists(.ip_address) {
+          _ip_str = to_string!(.ip_address)
+          if match(_ip_str, r'^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$') {
+            _metadata.ip_address = _ip_str
+          } else {
+            _metadata.ip_address = "0.0.0.0"
+          }
+        }
+        if exists(.request_id) { _metadata.request_id = to_string!(.request_id) }
+        if exists(.container_name) { _metadata.container_name = to_string!(.container_name) }
+        if exists(.container_id) { _metadata.container_id = to_string!(.container_id) }
+        if exists(.facility) { _metadata.syslog_facility = to_string!(.facility) }
+        if exists(.appname) { _metadata.appname = to_string!(.appname) }
+        if exists(.procid) { _metadata.procid = to_string!(.procid) }
+        if exists(.image) { _metadata.docker_image = to_string!(.image) }
+      }
+
+      # ── Format timestamp ─────────────────────────────────────────────
+      _ts = format_timestamp!(.timestamp, format: "%Y-%m-%dT%H:%M:%S%.fZ")
+
+      # ── Output formatting per event type ─────────────────────────────
+
+      if .clif_event_type == "security" {
+        _sev = if exists(.severity) { .severity } else { 0 }
+        _sev_int, err = to_int(_sev)
+        if err != null { _sev_int = 0 }
+        _cat = if exists(.category) { to_string!(.category) } else { "unknown" }
+        _src = if exists(.source) { to_string!(.source) } else { "vector" }
+        _desc = if exists(.description) { to_string!(.description) } else { _msg }
+        _uid = if exists(.user_id) { to_string!(.user_id) } else { "" }
+        _ip_raw = if exists(.ip_address) { to_string!(.ip_address) } else { "0.0.0.0" }
+        _ip = if match(_ip_raw, r'^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$') { _ip_raw } else { "0.0.0.0" }
+        _hn = if exists(.hostname) { to_string!(.hostname) } else { "" }
+        _mt = if exists(.mitre_tactic) { to_string!(.mitre_tactic) } else { "" }
+        _mte = if exists(.mitre_technique) { to_string!(.mitre_technique) } else { "" }
+        . = {
+          "clif_event_type": "security",
+          "timestamp": _ts,
+          "severity": _sev_int,
+          "category": _cat,
+          "source": _src,
+          "description": _desc,
+          "user_id": _uid,
+          "ip_address": _ip,
+          "hostname": _hn,
+          "mitre_tactic": _mt,
+          "mitre_technique": _mte,
+          "message_body": _msg_body,
+          "source_type": _src_type,
+          "original_log_level": .original_log_level,
+          "metadata": _metadata
+        }
+
+      } else if .clif_event_type == "process" {
+        # Section D guaranteed all process fields exist — no exists() checks needed
+        . = {
+          "clif_event_type": "process",
+          "timestamp": _ts,
+          "hostname": to_string!(.hostname),
+          "pid": .pid,
+          "ppid": .ppid,
+          "uid": .uid,
+          "gid": .gid,
+          "binary_path": to_string!(.binary_path),
+          "arguments": to_string!(.arguments),
+          "cwd": to_string!(.cwd),
+          "exit_code": .exit_code,
+          "container_id": to_string!(.proc_container_id),
+          "pod_name": to_string!(.pod_name),
+          "namespace": to_string!(.ns),
+          "syscall": to_string!(.syscall),
+          "is_suspicious": 0,
+          "detection_rule": "",
+          "message_body": _msg_body,
+          "source_type": _src_type,
+          "original_log_level": .original_log_level,
+          "metadata": _metadata
+        }
+
+      } else if .clif_event_type == "network" {
+        # Section D guaranteed all network fields exist — no exists() checks needed
+        _net_bp = if exists(.binary_path) { to_string!(.binary_path) } else { "" }
+        _net_cid = if exists(.container_id) { to_string!(.container_id) } else { "" }
+        _net_pn = if exists(.pod_name) { to_string!(.pod_name) } else { "" }
+        _net_ns = if exists(.namespace) { to_string!(.namespace) } else { "" }
+        . = {
+          "clif_event_type": "network",
+          "timestamp": _ts,
+          "hostname": to_string!(.hostname),
+          "src_ip": to_string!(.src_ip),
+          "src_port": .src_port,
+          "dst_ip": to_string!(.dst_ip),
+          "dst_port": .dst_port,
+          "protocol": to_string!(.protocol),
+          "direction": to_string!(.direction),
+          "bytes_sent": .bytes_sent,
+          "bytes_received": .bytes_received,
+          "duration_ms": .duration_ms,
+          "pid": .pid,
+          "binary_path": _net_bp,
+          "container_id": _net_cid,
+          "pod_name": _net_pn,
+          "namespace": _net_ns,
+          "dns_query": to_string!(.dns_query),
+          "geo_country": to_string!(.geo_country),
+          "is_suspicious": 0,
+          "detection_rule": "",
+          "message_body": _msg_body,
+          "source_type": _src_type,
+          "original_log_level": .original_log_level,
+          "metadata": _metadata
+        }
+
+      } else {
+        # ── Raw log: drop DEBUG events ─────────────────────────────────
+        _lvl = if exists(.level) { to_string(.level) } else { "INFO" }
+        if _lvl == "DEBUG" { abort }
+        _src = if exists(.source) { to_string!(.source) } else { "vector" }
+
+        # Preserve parsed IP before obj rebuild (extracted in Section B)
+        _raw_ip = "0.0.0.0"
+        if exists(.ip_address) {
+          _raw_ip_s = to_string!(.ip_address)
+          if match(_raw_ip_s, r'^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$') {
+            _raw_ip = _raw_ip_s
+          }
+        }
+
+        . = {
+          "clif_event_type": "raw",
+          "timestamp": _ts,
+          "level": _lvl,
+          "source": _src,
+          "ip_address": _raw_ip,
+          "message": _msg,
+          "message_body": _msg_body,
+          "source_type": _src_type,
+          "original_log_level": .original_log_level,
+          "metadata": _metadata
+        }
+      }
+
+
+  # ── Route to event-type-specific sinks ──────────────────────────────────
+  route_by_type:
+    type: route
+    inputs:
+      - "mega_transform"
+    route:
+      security: '.clif_event_type == "security"'
+      process: '.clif_event_type == "process"'
+      network: '.clif_event_type == "network"'
+      raw: '.clif_event_type == "raw"'
+
+
+# =============================================================================
+#                              SINKS
+# =============================================================================
+
+sinks:
+
+  # ── Raw Logs → Redpanda (production path) ───────────────────────────────
+  sink_raw_logs:
+    type: kafka
+    inputs:
+      - "route_by_type.raw"
+    bootstrap_servers: "${VECTOR_KAFKA_BROKERS:-redpanda01:9092}"
+    topic: "raw-logs"
+    encoding:
+      codec: json
+    compression: lz4
+    batch:
+      max_bytes: 10485760
+      max_events: 50000
+      timeout_secs: 0.1
+    buffer:
+      type: memory
+      max_events: 100000
+      when_full: block
+    librdkafka_options:
+      "queue.buffering.max.messages": "1000000"
+      "queue.buffering.max.kbytes": "1048576"
+      "message.send.max.retries": "10"
+      "retry.backoff.ms": "200"
+      "retry.backoff.max.ms": "10000"
+      "request.required.acks": "1"
+      "enable.idempotence": "false"
+      "linger.ms": "5"
+      "compression.type": "lz4"
+
+  # ── Security Events → Redpanda (production path) ───────────────────────
+  sink_security_events:
+    type: kafka
+    inputs:
+      - "route_by_type.security"
+    bootstrap_servers: "${VECTOR_KAFKA_BROKERS:-redpanda01:9092}"
+    topic: "security-events"
+    encoding:
+      codec: json
+    compression: lz4
+    batch:
+      max_bytes: 10485760
+      max_events: 50000
+      timeout_secs: 0.1
+    buffer:
+      type: memory
+      max_events: 100000
+      when_full: block
+    librdkafka_options:
+      "queue.buffering.max.messages": "1000000"
+      "queue.buffering.max.kbytes": "1048576"
+      "message.send.max.retries": "10"
+      "retry.backoff.ms": "200"
+      "retry.backoff.max.ms": "10000"
+      "request.required.acks": "1"
+      "enable.idempotence": "false"
+      "linger.ms": "5"
+      "compression.type": "lz4"
+
+  # ── Process Events → Redpanda (production path) ────────────────────────
+  sink_process_events:
+    type: kafka
+    inputs:
+      - "route_by_type.process"
+    bootstrap_servers: "${VECTOR_KAFKA_BROKERS:-redpanda01:9092}"
+    topic: "process-events"
+    encoding:
+      codec: json
+    compression: lz4
+    batch:
+      max_bytes: 10485760
+      max_events: 50000
+      timeout_secs: 0.1
+    buffer:
+      type: memory
+      max_events: 100000
+      when_full: block
+    librdkafka_options:
+      "queue.buffering.max.messages": "1000000"
+      "queue.buffering.max.kbytes": "1048576"
+      "message.send.max.retries": "10"
+      "retry.backoff.ms": "200"
+      "retry.backoff.max.ms": "10000"
+      "request.required.acks": "1"
+      "enable.idempotence": "false"
+      "linger.ms": "5"
+      "compression.type": "lz4"
+
+  # ── Network Events → Redpanda (production path) ────────────────────────
+  sink_network_events:
+    type: kafka
+    inputs:
+      - "route_by_type.network"
+    bootstrap_servers: "${VECTOR_KAFKA_BROKERS:-redpanda01:9092}"
+    topic: "network-events"
+    encoding:
+      codec: json
+    compression: lz4
+    batch:
+      max_bytes: 10485760
+      max_events: 50000
+      timeout_secs: 0.1
+    buffer:
+      type: memory
+      max_events: 100000
+      when_full: block
+    librdkafka_options:
+      "queue.buffering.max.messages": "1000000"
+      "queue.buffering.max.kbytes": "1048576"
+      "message.send.max.retries": "10"
+      "retry.backoff.ms": "200"
+      "retry.backoff.max.ms": "10000"
+      "request.required.acks": "1"
+      "enable.idempotence": "false"
+      "linger.ms": "5"
+      "compression.type": "lz4"
+
+  # ── Vector Internal Metrics → Prometheus ─────────────────────────────────
+  prometheus_exporter:
+    type: prometheus_exporter
+    inputs:
+      - "internal_metrics"
+    address: "0.0.0.0:9598"
+    default_namespace: "clif_vector"
+
+  # ── Vector Operational Logs → Console ────────────────────────────────────
+  internal_log_sink:
+    type: console
+    inputs:
+      - "internal_logs"
+    encoding:
+      codec: json
+    target: stdout

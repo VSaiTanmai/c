@@ -1,0 +1,107 @@
+# =============================================================================
+# CLIF — Prometheus Configuration (Cluster Mode — PC2)
+# =============================================================================
+# PC1 targets use hostnames resolved via extra_hosts in docker-compose.pc2.yml
+# PC2 targets use Docker container hostnames (same compose network)
+# =============================================================================
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+  scrape_timeout: 10s
+  external_labels:
+    cluster: 'clif-siem'
+    environment: 'cluster'
+
+rule_files:
+  - "/etc/prometheus/alert_rules.yml"
+
+# ── Alertmanager ──────────────────────────────────────────────────────────
+alerting:
+  alertmanagers:
+    - static_configs:
+        - targets: ["alertmanager:9093"]
+
+scrape_configs:
+
+  # ── PC1 Data-Tier Targets ───────────────────────────────────────────────
+  # Hostnames resolved via extra_hosts → DATA_IP
+
+  - job_name: "clickhouse-01"
+    static_configs:
+      - targets: ["clickhouse01:9363"]
+        labels:
+          node: "clickhouse01"
+          role: "replica_01"
+          tier: "data"
+    metrics_path: /metrics
+
+  - job_name: "clickhouse-02"
+    static_configs:
+      - targets: ["clickhouse02:9364"]
+        labels:
+          node: "clickhouse02"
+          role: "replica_02"
+          tier: "data"
+    metrics_path: /metrics
+
+  - job_name: "redpanda"
+    static_configs:
+      - targets:
+          - "redpanda01:9644"
+          - "redpanda02:9645"
+          - "redpanda03:9646"
+        labels:
+          tier: "data"
+    metrics_path: /public_metrics
+
+  - job_name: "minio"
+    static_configs:
+      - targets: ["minio1:9002"]
+        labels:
+          tier: "data"
+    metrics_path: /minio/v2/metrics/cluster
+
+  - job_name: "minio-node"
+    static_configs:
+      - targets: ["minio1:9002"]
+        labels:
+          tier: "data"
+    metrics_path: /minio/v2/metrics/node
+
+  # ── PC2 Compute-Tier Targets ───────────────────────────────────────────
+  # Docker hostnames on same compose network
+
+  - job_name: "vector"
+    static_configs:
+      - targets: ["clif-vector:9598"]
+        labels:
+          service: "vector"
+          tier: "compute"
+    metrics_path: /metrics
+
+  - job_name: "grafana"
+    static_configs:
+      - targets: ["grafana:3000"]
+        labels:
+          tier: "compute"
+    metrics_path: /metrics
+
+  - job_name: "prometheus"
+    static_configs:
+      - targets: ["localhost:9090"]
+
+  - job_name: "alertmanager"
+    static_configs:
+      - targets: ["alertmanager:9093"]
+        labels:
+          service: "alertmanager"
+          tier: "compute"
+
+  - job_name: "lancedb"
+    static_configs:
+      - targets: ["clif-lancedb:8100"]
+        labels:
+          service: "lancedb"
+          tier: "compute"
+    metrics_path: /stats
+    scrape_interval: 30s

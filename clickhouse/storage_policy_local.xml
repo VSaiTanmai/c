@@ -1,0 +1,38 @@
+<clickhouse>
+    <storage_configuration>
+        <disks>
+            <!-- Default local disk (hot) -->
+            <default>
+                <keep_free_space_bytes>1073741824</keep_free_space_bytes>
+            </default>
+            <!-- Warm tier — separate local path -->
+            <warm_disk>
+                <path>/var/lib/clickhouse/warm/</path>
+                <keep_free_space_bytes>536870912</keep_free_space_bytes>
+            </warm_disk>
+            <!-- Cold tier — local fallback (replaces S3/MinIO in production) -->
+            <cold_disk>
+                <path>/var/lib/clickhouse/cold/</path>
+                <keep_free_space_bytes>536870912</keep_free_space_bytes>
+            </cold_disk>
+        </disks>
+
+        <policies>
+            <!-- Same policy name as production so schema.sql works unchanged -->
+            <clif_tiered>
+                <volumes>
+                    <hot>
+                        <disk>default</disk>
+                    </hot>
+                    <warm>
+                        <disk>warm_disk</disk>
+                    </warm>
+                    <cold>
+                        <disk>cold_disk</disk>
+                    </cold>
+                </volumes>
+                <move_factor>0.1</move_factor>
+            </clif_tiered>
+        </policies>
+    </storage_configuration>
+</clickhouse>

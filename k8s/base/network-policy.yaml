@@ -1,0 +1,104 @@
+# =============================================================================
+# NetworkPolicy — Zero-trust network segmentation
+# =============================================================================
+# Demonstrates production security posture for evaluators.
+# Three tiers: data (storage), compute (pipeline), monitoring
+# =============================================================================
+
+# ── Default deny all ingress in clif namespace ────────────────────────────────
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: default-deny-ingress
+  namespace: clif
+spec:
+  podSelector: {}
+  policyTypes:
+    - Ingress
+
+---
+# ── Data tier: only internal components can reach storage ─────────────────────
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-data-tier
+  namespace: clif
+spec:
+  podSelector:
+    matchLabels:
+      tier: data
+  policyTypes:
+    - Ingress
+  ingress:
+    # Allow from any pod in the clif namespace
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: clif
+
+---
+# ── Compute tier: accept traffic from within namespace ────────────────────────
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-compute-tier
+  namespace: clif
+spec:
+  podSelector:
+    matchLabels:
+      tier: compute
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: clif
+
+---
+# ── Monitoring tier: allow Prometheus scrape + external dashboard access ──────
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-monitoring-tier
+  namespace: clif
+spec:
+  podSelector:
+    matchLabels:
+      tier: monitoring
+  policyTypes:
+    - Ingress
+  ingress:
+    # From within namespace
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: clif
+    # Allow external access via NodePort (Grafana, RP Console)
+    - ports:
+        - protocol: TCP
+          port: 3000
+        - protocol: TCP
+          port: 8080
+
+---
+# ── Vector: accept syslog + HTTP ingest from any source ──────────────────────
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-vector-ingest
+  namespace: clif
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: vector
+  policyTypes:
+    - Ingress
+  ingress:
+    - ports:
+        - protocol: TCP
+          port: 1514
+        - protocol: UDP
+          port: 1514
+        - protocol: TCP
+          port: 8687

@@ -1,0 +1,181 @@
+# =============================================================================
+# Redpanda StatefulSet — 3-node Kafka-compatible streaming cluster
+# =============================================================================
+# Uses headless service for stable DNS: redpanda-{0,1,2}.redpanda-headless.clif.svc
+# Each broker gets unique advertised listeners via ordinal-based init container.
+# =============================================================================
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: redpanda
+  namespace: clif
+  labels:
+    app.kubernetes.io/name: redpanda
+    app.kubernetes.io/component: streaming
+    app.kubernetes.io/part-of: clif-siem
+    tier: data
+spec:
+  serviceName: redpanda-headless
+  replicas: 3
+  podManagementPolicy: Parallel
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: redpanda
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: redpanda
+        app.kubernetes.io/component: streaming
+        tier: data
+    spec:
+      terminationGracePeriodSeconds: 30
+      nodeSelector:
+        clif/tier: data
+      tolerations:
+        - key: clif/tier
+          operator: Equal
+          value: data
+          effect: NoSchedule
+      initContainers:
+        # Generates per-broker config based on pod ordinal
+        - name: configure
+          image: busybox:1.36
+          command:
+            - /bin/sh
+            - -c
+            - |
+              set -e
+              ORDINAL=${HOSTNAME##*-}
+              INTERNAL_PORT=9092
+              EXTERNAL_BASE_PORT=31092   # NodePort: 31092, 31093, 31094
+              EXTERNAL_PORT=$((EXTERNAL_BASE_PORT + ORDINAL))
+              RPC_PORT=33145
+              ADMIN_PORT=9644
+
+              cat > /etc/redpanda/bootstrap.yaml <<EOF
+              redpanda:
+                seed_servers:
+                  - host:
+                      address: redpanda-0.redpanda-headless.clif.svc.cluster.local
+                      port: ${RPC_PORT}
+                rpc_server:
+                  address: 0.0.0.0
+                  port: ${RPC_PORT}
+                advertised_rpc_api:
+                  address: ${HOSTNAME}.redpanda-headless.clif.svc.cluster.local
+                  port: ${RPC_PORT}
+                kafka_api:
+                  - address: 0.0.0.0
+                    port: ${INTERNAL_PORT}
+                    name: internal
+                  - address: 0.0.0.0
+                    port: ${EXTERNAL_PORT}
+                    name: external
+                advertised_kafka_api:
+                  - address: ${HOSTNAME}.redpanda-headless.clif.svc.cluster.local
+                    port: ${INTERNAL_PORT}
+                    name: internal
+                  - address: \${NODE_IP}
+                    port: ${EXTERNAL_PORT}
+                    name: external
+                admin:
+                  - address: 0.0.0.0
+                    port: ${ADMIN_PORT}
+                developer_mode: false
+                empty_seed_starts_cluster: false
+              rpk:
+                overprovisioned: true
+              pandaproxy:
+                pandaproxy_api:
+                  - address: 0.0.0.0
+                    port: 8082
+                    name: internal
+                advertised_pandaproxy_api:
+                  - address: ${HOSTNAME}.redpanda-headless.clif.svc.cluster.local
+                    port: 8082
+                    name: internal
+              EOF
+              echo "Generated config for broker ordinal ${ORDINAL}"
+          env:
+            - name: NODE_IP
+              valueFrom:
+                fieldRef:
+                  fieldPath: status.hostIP
+          volumeMounts:
+            - name: config
+              mountPath: /etc/redpanda
+      containers:
+        - name: redpanda
+          image: redpandadata/redpanda:v24.2.8
+          command:
+            - rpk
+            - redpanda
+            - start
+            - --check=false
+            - --smp=1
+            - --memory=2G
+            - --reserve-memory=200M
+            - --default-log-level=warn
+          ports:
+            - name: kafka-internal
+              containerPort: 9092
+              protocol: TCP
+            - name: rpc
+              containerPort: 33145
+              protocol: TCP
+            - name: admin
+              containerPort: 9644
+              protocol: TCP
+            - name: pandaproxy
+              containerPort: 8082
+              protocol: TCP
+          env:
+            - name: NODE_IP
+              valueFrom:
+                fieldRef:
+                  fieldPath: status.hostIP
+          resources:
+            requests:
+              cpu: "1"
+              memory: 2Gi
+            limits:
+              cpu: "2"
+              memory: 3Gi
+          volumeMounts:
+            - name: datadir
+              mountPath: /var/lib/redpanda/data
+            - name: config
+              mountPath: /etc/redpanda
+          startupProbe:
+            httpGet:
+              path: /v1/status/ready
+              port: admin
+            initialDelaySeconds: 10
+            periodSeconds: 10
+            failureThreshold: 30
+          readinessProbe:
+            httpGet:
+              path: /v1/status/ready
+              port: admin
+            periodSeconds: 10
+            timeoutSeconds: 5
+          livenessProbe:
+            httpGet:
+              path: /v1/status/ready
+              port: admin
+            initialDelaySeconds: 30
+            periodSeconds: 15
+            timeoutSeconds: 10
+      volumes:
+        - name: config
+          emptyDir: {}
+  volumeClaimTemplates:
+    - metadata:
+        name: datadir
+        labels:
+          app.kubernetes.io/name: redpanda
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        resources:
+          requests:
+            storage: 20Gi

@@ -1,0 +1,21 @@
+title: Privilege Escalation – UAC Bypass / Abuse Elevation (T1548)
+id: clif-privesc-001
+status: production
+severity: high
+category: windows_event_log
+description: >
+  Host-level events indicating privilege escalation attempts such as
+  UAC bypass or abuse of elevation control mechanisms.
+tags:
+  - attack.t1548
+  - attack.privilege_escalation
+detection:
+  condition: and
+  keywords:
+    - "privilege-escalation"
+  clickhouse: |
+    SELECT count() > 0
+    FROM {database}.security_events
+    WHERE hostname = '{hostname}'
+      AND mitre_tactic = 'privilege-escalation'
+      AND timestamp >= now() - INTERVAL {window_minutes} MINUTE

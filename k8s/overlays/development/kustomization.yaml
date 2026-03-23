@@ -1,0 +1,123 @@
+# =============================================================================
+# CLIF SIEM — Development Overlay
+# =============================================================================
+# Reduced resource footprint for local K8s (Docker Desktop / K3s / Minikube).
+# - Single replicas for most StatefulSets
+# - Lower resource limits
+# - Removed nodeSelector constraints
+# =============================================================================
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: clif
+
+resources:
+  - ../../base
+
+labels:
+  - pairs:
+      environment: development
+    includeSelectors: false
+
+# ── Reduce replicas for dev ───────────────────────────────────────────────────
+replicas:
+  - name: redpanda
+    count: 1
+  - name: clickhouse
+    count: 1
+  - name: minio
+    count: 1
+  - name: consumer
+    count: 1
+
+# ── Patch out nodeSelector for single-node dev clusters ──────────────────────
+patches:
+  # Remove nodeSelector from Deployments that have it
+  - target:
+      kind: Deployment
+      labelSelector: "tier in (compute)"
+    patch: |
+      - op: remove
+        path: /spec/template/spec/nodeSelector
+  # Remove nodeSelector from StatefulSets that have it
+  - target:
+      kind: StatefulSet
+      labelSelector: "tier in (data,compute)"
+    patch: |
+      - op: remove
+        path: /spec/template/spec/nodeSelector
+  # Remove tolerations from StatefulSets that have them
+  - target:
+      kind: StatefulSet
+      labelSelector: "tier=data"
+    patch: |
+      - op: remove
+        path: /spec/template/spec/tolerations
+
+  # Reduce Redpanda memory for single-node
+  - target:
+      kind: StatefulSet
+      name: redpanda
+    patch: |
+      - op: replace
+        path: /spec/template/spec/containers/0/resources/limits/memory
+        value: 2Gi
+      - op: replace
+        path: /spec/template/spec/containers/0/resources/requests/memory
+        value: 1Gi
+
+  # Reduce ClickHouse resources
+  - target:
+      kind: StatefulSet
+      name: clickhouse
+    patch: |
+      - op: replace
+        path: /spec/template/spec/containers/0/resources/limits/memory
+        value: 2Gi
+      - op: replace
+        path: /spec/template/spec/containers/0/resources/limits/cpu
+        value: "2"
+
+  # Reduce PVC sizes for development
+  - target:
+      kind: StatefulSet
+      name: redpanda
+    patch: |
+      - op: replace
+        path: /spec/volumeClaimTemplates/0/spec/resources/requests/storage
+        value: 5Gi
+  - target:
+      kind: StatefulSet
+      name: clickhouse
+    patch: |
+      - op: replace
+        path: /spec/volumeClaimTemplates/0/spec/resources/requests/storage
+        value: 10Gi
+  - target:
+      kind: StatefulSet
+      name: minio
+    patch: |
+      - op: replace
+        path: /spec/volumeClaimTemplates/0/spec/resources/requests/storage
+        value: 5Gi
+
+  # Disable HPAs in development (not useful with fixed replicas)
+  - target:
+      kind: HorizontalPodAutoscaler
+    patch: |
+      - op: replace
+        path: /spec/minReplicas
+        value: 1
+      - op: replace
+        path: /spec/maxReplicas
+        value: 2
+
+  # Remove NetworkPolicies in dev (simpler debugging)
+  - target:
+      kind: NetworkPolicy
+    patch: |
+      $patch: delete
+      apiVersion: networking.k8s.io/v1
+      kind: NetworkPolicy
+      metadata:
+        name: unused

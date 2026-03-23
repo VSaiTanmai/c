@@ -1,0 +1,10 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: clif
+  labels:
+    app.kubernetes.io/name: clif
+    app.kubernetes.io/part-of: clif-siem
+    app.kubernetes.io/version: "1.0.0"
+  annotations:
+    description: "CLIF — Cognitive Log Investigation Framework (SIH1733)"

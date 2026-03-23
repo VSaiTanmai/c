@@ -1,0 +1,403 @@
+<!--
+  CLIF Sysmon Configuration — Production-Grade Event Collection
+  =============================================================
+  Based on SwiftOnSecurity/sysmon-config and olafhartong/sysmon-modular.
+  Tuned for CLIF's 4-table schema: process_events, network_events,
+  security_events, raw_logs.
+
+  Event IDs collected:
+    1  — Process Create           → process_events
+    2  — File creation time       → raw_logs (timestomp detection)
+    3  — Network Connection       → network_events
+    5  — Process Terminate        → process_events
+    6  — Driver Loaded            → security_events
+    7  — Image Loaded (DLL)       → process_events
+    8  — CreateRemoteThread       → security_events (injection)
+    9  — RawAccessRead            → security_events (disk read)
+    10 — Process Access           → security_events (credential dump)
+    11 — File Create              → raw_logs
+    12 — Registry key create/del  → security_events
+    13 — Registry value set       → security_events
+    14 — Registry key rename      → security_events
+    15 — FileCreateStreamHash     → security_events (ADS)
+    17 — Pipe Created             → raw_logs (C2 channels)
+    18 — Pipe Connected           → raw_logs (lateral movement)
+    22 — DNS Query                → network_events
+    23 — File Delete archived     → raw_logs
+    24 — Clipboard Change         → security_events
+    25 — Process Tampering        → security_events
+    26 — File Delete logged       → raw_logs
+
+  Install:
+    sysmon64.exe -accepteula -i sysmonconfig-clif.xml
+  Update:
+    sysmon64.exe -c sysmonconfig-clif.xml
+  Uninstall:
+    sysmon64.exe -u
+
+  Schema version: 4.90 (Sysmon 15.x+)
+-->
+<Sysmon schemaversion="4.90">
+
+  <!-- ═══════════════════════════════════════════════════════════════════ -->
+  <!-- Hash algorithms for file/process integrity                         -->
+  <!-- ═══════════════════════════════════════════════════════════════════ -->
+  <HashAlgorithms>SHA256,IMPHASH</HashAlgorithms>
+
+  <!-- Archive deleted files for forensic analysis (max 500 MB) -->
+  <ArchiveDirectory>C:\CLIF\SysmonArchive</ArchiveDirectory>
+
+  <!-- Check certificate revocation on image loads -->
+  <CheckRevocation>true</CheckRevocation>
+
+  <EventFiltering>
+
+    <!-- ═════════════════════════════════════════════════════════════════ -->
+    <!-- EVENT ID 1: Process Create → process_events                      -->
+    <!-- High-fidelity: exclude known-good OS noise, keep everything else -->
+    <!-- ═════════════════════════════════════════════════════════════════ -->
+    <RuleGroup name="ProcessCreate" groupRelation="or">
+      <ProcessCreate onmatch="exclude">
+        <!-- Windows Update noise -->
+        <Image condition="is">C:\Windows\System32\backgroundTaskHost.exe</Image>
+        <Image condition="is">C:\Windows\System32\RuntimeBroker.exe</Image>
+        <Image condition="is">C:\Windows\System32\SearchProtocolHost.exe</Image>
+        <Image condition="is">C:\Windows\System32\SearchFilterHost.exe</Image>
+        <Image condition="is">C:\Windows\System32\SearchIndexer.exe</Image>
+        <Image condition="is">C:\Windows\System32\MusNotification.exe</Image>
+        <Image condition="is">C:\Windows\System32\usoclient.exe</Image>
+        <!-- Windows Defender scanning -->
+        <Image condition="is">C:\ProgramData\Microsoft\Windows Defender\Platform\*\MsMpEng.exe</Image>
+        <Image condition="is">C:\ProgramData\Microsoft\Windows Defender\Platform\*\NisSrv.exe</Image>
+        <!-- Sysmon itself -->
+        <Image condition="is">C:\Windows\Sysmon64.exe</Image>
+        <Image condition="is">C:\Windows\Sysmon.exe</Image>
+        <!-- WMI Provider Host (extremely noisy) -->
+        <ParentImage condition="is">C:\Windows\System32\svchost.exe</ParentImage>
+        <Image condition="is">C:\Windows\System32\wbem\WmiPrvSE.exe</Image>
+      </ProcessCreate>
+    </RuleGroup>
+
+    <!-- ═════════════════════════════════════════════════════════════════ -->
+    <!-- EVENT ID 2: File Creation Time Changed → raw_logs (timestomp)    -->
+    <!-- Only log suspicious timestomps, not legitimate app behavior       -->
+    <!-- ═════════════════════════════════════════════════════════════════ -->
+    <RuleGroup name="FileCreateTime" groupRelation="or">
+      <FileCreateTime onmatch="exclude">
+        <Image condition="is">C:\Windows\System32\msiexec.exe</Image>
+        <Image condition="is">C:\Windows\System32\svchost.exe</Image>
+        <Image condition="contains">OneDrive</Image>
+        <Image condition="contains">Chrome</Image>
+        <Image condition="contains">Firefox</Image>
+        <Image condition="contains">Edge</Image>
+        <TargetFilename condition="contains">\AppData\Local\</TargetFilename>
+      </FileCreateTime>
+    </RuleGroup>
+
+    <!-- ═════════════════════════════════════════════════════════════════ -->
+    <!-- EVENT ID 3: Network Connection → network_events                  -->
+    <!-- Exclude browser/update noise, keep suspicious outbound           -->
+    <!-- ═════════════════════════════════════════════════════════════════ -->
+    <RuleGroup name="NetworkConnect" groupRelation="or">
+      <NetworkConnect onmatch="exclude">
+        <!-- Browser connections (extremely noisy) -->
+        <Image condition="end with">chrome.exe</Image>
+        <Image condition="end with">msedge.exe</Image>
+        <Image condition="end with">firefox.exe</Image>
+        <!-- Windows Update -->
+        <Image condition="is">C:\Windows\System32\svchost.exe</Image>
+        <DestinationPort condition="is">80</DestinationPort>
+        <Image condition="is">C:\Windows\System32\svchost.exe</Image>
+        <DestinationPort condition="is">443</DestinationPort>
+        <!-- Localhost -->
+        <DestinationIp condition="is">127.0.0.1</DestinationIp>
+        <DestinationIp condition="begin with">169.254.</DestinationIp>
+      </NetworkConnect>
+    </RuleGroup>
+
+    <!-- ═════════════════════════════════════════════════════════════════ -->
+    <!-- EVENT ID 5: Process Terminate → process_events                   -->
+    <!-- Log all terminations (low volume, high correlation value)         -->
+    <!-- ═════════════════════════════════════════════════════════════════ -->
+    <RuleGroup name="ProcessTerminate" groupRelation="or">
+      <ProcessTerminate onmatch="exclude">
+        <Image condition="is">C:\Windows\System32\backgroundTaskHost.exe</Image>
+        <Image condition="is">C:\Windows\System32\RuntimeBroker.exe</Image>
+        <Image condition="is">C:\Windows\System32\conhost.exe</Image>
+      </ProcessTerminate>
+    </RuleGroup>
+
+    <!-- ═════════════════════════════════════════════════════════════════ -->
+    <!-- EVENT ID 6: Driver Loaded → security_events                      -->
+    <!-- Critical: detect unsigned/suspicious kernel drivers               -->
+    <!-- ═════════════════════════════════════════════════════════════════ -->
+    <RuleGroup name="DriverLoad" groupRelation="or">
+      <DriverLoad onmatch="include">
+        <!-- Alert on unsigned drivers -->
+        <Signed condition="is">false</Signed>
+        <!-- Alert on drivers from temp/user directories -->
+        <ImageLoaded condition="contains">\Temp\</ImageLoaded>
+        <ImageLoaded condition="contains">\Users\</ImageLoaded>
+        <ImageLoaded condition="contains">\Downloads\</ImageLoaded>
+        <ImageLoaded condition="contains">\AppData\</ImageLoaded>
+      </DriverLoad>
+    </RuleGroup>
+
+    <!-- ═════════════════════════════════════════════════════════════════ -->
+    <!-- EVENT ID 7: Image Loaded (DLL) → process_events                  -->
+    <!-- Focus on unsigned DLLs and suspicious paths (DLL sideloading)    -->
+    <!-- ═════════════════════════════════════════════════════════════════ -->
+    <RuleGroup name="ImageLoad" groupRelation="or">
+      <ImageLoad onmatch="include">
+        <!-- Unsigned DLLs -->
+        <Signed condition="is">false</Signed>
+        <!-- DLLs loaded from suspicious locations -->
+        <ImageLoaded condition="contains">\Temp\</ImageLoaded>
+        <ImageLoaded condition="contains">\Users\Public\</ImageLoaded>
+        <ImageLoaded condition="contains">\ProgramData\</ImageLoaded>
+        <ImageLoaded condition="contains">\Downloads\</ImageLoaded>
+        <!-- Known attack DLLs -->
+        <ImageLoaded condition="end with">clr.dll</ImageLoaded>
+        <ImageLoaded condition="end with">mscoree.dll</ImageLoaded>
+        <ImageLoaded condition="end with">amsi.dll</ImageLoaded>
+        <ImageLoaded condition="end with">dbghelp.dll</ImageLoaded>
+        <ImageLoaded condition="end with">dbgcore.dll</ImageLoaded>
+        <ImageLoaded condition="end with">winsqlite3.dll</ImageLoaded>
+      </ImageLoad>
+    </RuleGroup>
+
+    <!-- ═════════════════════════════════════════════════════════════════ -->
+    <!-- EVENT ID 8: CreateRemoteThread → security_events                 -->
+    <!-- Critical: process injection detection (Mimikatz, Cobalt Strike)  -->
+    <!-- ═════════════════════════════════════════════════════════════════ -->
+    <RuleGroup name="CreateRemoteThread" groupRelation="or">
+      <CreateRemoteThread onmatch="exclude">
+        <!-- Exclude known legitimate remote threads -->
+        <SourceImage condition="is">C:\Windows\System32\csrss.exe</SourceImage>
+        <SourceImage condition="is">C:\Windows\System32\lsass.exe</SourceImage>
+        <SourceImage condition="is">C:\Windows\System32\services.exe</SourceImage>
+        <SourceImage condition="is">C:\Windows\System32\svchost.exe</SourceImage>
+        <SourceImage condition="is">C:\Windows\System32\wbem\WmiPrvSE.exe</SourceImage>
+        <!-- Visual Studio debugging -->
+        <SourceImage condition="contains">devenv.exe</SourceImage>
+        <SourceImage condition="contains">vstest</SourceImage>
+      </CreateRemoteThread>
+    </RuleGroup>
+
+    <!-- ═════════════════════════════════════════════════════════════════ -->
+    <!-- EVENT ID 9: RawAccessRead → security_events                      -->
+    <!-- Detect direct disk reads (shadow copy, MBR manipulation)         -->
+    <!-- ═════════════════════════════════════════════════════════════════ -->
+    <RuleGroup name="RawAccessRead" groupRelation="or">
+      <RawAccessRead onmatch="include">
+        <Device condition="end with">\Device\HarddiskVolume1</Device>
+        <Device condition="end with">\Device\HarddiskVolume2</Device>
+        <Device condition="end with">\Device\Harddisk0\DR0</Device>
+      </RawAccessRead>
+    </RuleGroup>
+
+    <!-- ═════════════════════════════════════════════════════════════════ -->
+    <!-- EVENT ID 10: Process Access → security_events                    -->
+    <!-- Critical: LSASS credential dumping detection                     -->
+    <!-- ═════════════════════════════════════════════════════════════════ -->
+    <RuleGroup name="ProcessAccess" groupRelation="or">
+      <ProcessAccess onmatch="include">
+        <!-- LSASS access (Mimikatz, procdump, comsvcs.dll) -->
+        <TargetImage condition="is">C:\Windows\System32\lsass.exe</TargetImage>
+        <!-- Credential manager access -->
+        <TargetImage condition="is">C:\Windows\System32\csrss.exe</TargetImage>
+        <!-- WinLogon access -->
+        <TargetImage condition="is">C:\Windows\System32\winlogon.exe</TargetImage>
+      </ProcessAccess>
+    </RuleGroup>
+
+    <!-- ═════════════════════════════════════════════════════════════════ -->
+    <!-- EVENT ID 11: File Create → raw_logs                              -->
+    <!-- Focus on suspicious directories and file types                   -->
+    <!-- ═════════════════════════════════════════════════════════════════ -->
+    <RuleGroup name="FileCreate" groupRelation="or">
+      <FileCreate onmatch="include">
+        <!-- Executable files in user-writable locations -->
+        <TargetFilename condition="end with">.exe</TargetFilename>
+        <TargetFilename condition="end with">.dll</TargetFilename>
+        <TargetFilename condition="end with">.sys</TargetFilename>
+        <TargetFilename condition="end with">.bat</TargetFilename>
+        <TargetFilename condition="end with">.cmd</TargetFilename>
+        <TargetFilename condition="end with">.ps1</TargetFilename>
+        <TargetFilename condition="end with">.vbs</TargetFilename>
+        <TargetFilename condition="end with">.js</TargetFilename>
+        <TargetFilename condition="end with">.hta</TargetFilename>
+        <TargetFilename condition="end with">.scr</TargetFilename>
+        <TargetFilename condition="end with">.lnk</TargetFilename>
+        <!-- Files in startup -->
+        <TargetFilename condition="contains">\Start Menu\Programs\Startup\</TargetFilename>
+        <!-- Files in temp directories -->
+        <TargetFilename condition="contains">\Temp\</TargetFilename>
+        <TargetFilename condition="contains">\Users\Public\</TargetFilename>
+        <!-- Alternate Data Streams -->
+        <TargetFilename condition="contains">:</TargetFilename>
+      </FileCreate>
+    </RuleGroup>
+
+    <!-- ═════════════════════════════════════════════════════════════════ -->
+    <!-- EVENT IDs 12-14: Registry Events → security_events               -->
+    <!-- Persistence, defense evasion, credential access via registry      -->
+    <!-- ═════════════════════════════════════════════════════════════════ -->
+    <RuleGroup name="RegistryEvent" groupRelation="or">
+      <RegistryEvent onmatch="include">
+        <!-- Run keys (persistence) -->
+        <TargetObject condition="contains">\CurrentVersion\Run</TargetObject>
+        <TargetObject condition="contains">\CurrentVersion\RunOnce</TargetObject>
+        <TargetObject condition="contains">\CurrentVersion\RunOnceEx</TargetObject>
+        <!-- Services (persistence) -->
+        <TargetObject condition="contains">\Services\</TargetObject>
+        <!-- Scheduled tasks -->
+        <TargetObject condition="contains">\Schedule\TaskCache\</TargetObject>
+        <!-- Security policy -->
+        <TargetObject condition="contains">\Policies\Microsoft\Windows\</TargetObject>
+        <!-- LSA secrets -->
+        <TargetObject condition="contains">\SECURITY\Policy\Secrets\</TargetObject>
+        <!-- SAM database -->
+        <TargetObject condition="contains">\SAM\SAM\Domains\</TargetObject>
+        <!-- WMI persistence -->
+        <TargetObject condition="contains">\SOFTWARE\Microsoft\Wbem\</TargetObject>
+        <!-- COM object hijacking -->
+        <TargetObject condition="contains">\InProcServer32\</TargetObject>
+        <!-- Debugger/IFEO hijacking -->
+        <TargetObject condition="contains">\Image File Execution Options\</TargetObject>
+        <!-- AppInit DLLs -->
+        <TargetObject condition="contains">\Windows NT\CurrentVersion\Windows\AppInit_DLLs</TargetObject>
+        <!-- Shell extensions -->
+        <TargetObject condition="contains">\ShellExecuteHooks</TargetObject>
+        <!-- Windows Defender tampering -->
+        <TargetObject condition="contains">\Windows Defender\</TargetObject>
+        <!-- Firewall rules -->
+        <TargetObject condition="contains">\FirewallPolicy\</TargetObject>
+        <!-- Terminal Services (RDP) -->
+        <TargetObject condition="contains">\Terminal Services\</TargetObject>
+        <!-- PowerShell execution policy -->
+        <TargetObject condition="contains">\PowerShell\</TargetObject>
+      </RegistryEvent>
+    </RuleGroup>
+
+    <!-- ═════════════════════════════════════════════════════════════════ -->
+    <!-- EVENT ID 15: FileCreateStreamHash (ADS) → security_events        -->
+    <!-- Alternate Data Streams — common hiding technique                  -->
+    <!-- ═════════════════════════════════════════════════════════════════ -->
+    <RuleGroup name="FileCreateStreamHash" groupRelation="or">
+      <FileCreateStreamHash onmatch="exclude">
+        <!-- Zone.Identifier is legitimate (Mark of the Web) -->
+        <TargetFilename condition="end with">Zone.Identifier</TargetFilename>
+      </FileCreateStreamHash>
+    </RuleGroup>
+
+    <!-- ═════════════════════════════════════════════════════════════════ -->
+    <!-- EVENT IDs 17-18: Pipe Events → raw_logs                          -->
+    <!-- Named pipes used for C2 (Cobalt Strike), lateral movement        -->
+    <!-- ═════════════════════════════════════════════════════════════════ -->
+    <RuleGroup name="PipeEvent" groupRelation="or">
+      <PipeEvent onmatch="include">
+        <!-- Known malicious pipe names -->
+        <PipeName condition="contains">\\MSSE-</PipeName>
+        <PipeName condition="contains">\\msagent_</PipeName>
+        <PipeName condition="contains">\\postex_</PipeName>
+        <PipeName condition="contains">\\status_</PipeName>
+        <PipeName condition="contains">\\mojo.</PipeName>
+        <PipeName condition="contains">\\interprocess.</PipeName>
+        <PipeName condition="contains">\\lsarpc</PipeName>
+        <PipeName condition="contains">\\samr</PipeName>
+        <PipeName condition="contains">\\netlogon</PipeName>
+        <PipeName condition="contains">\\wkssvc</PipeName>
+        <PipeName condition="contains">\\srvsvc</PipeName>
+        <PipeName condition="contains">\\atsvc</PipeName>
+        <PipeName condition="contains">\\epmapper</PipeName>
+        <!-- PSExec pipes -->
+        <PipeName condition="contains">\\PSEXESVC</PipeName>
+        <PipeName condition="contains">\\RemCom</PipeName>
+        <PipeName condition="contains">\\csexec</PipeName>
+      </PipeEvent>
+    </RuleGroup>
+
+    <!-- ═════════════════════════════════════════════════════════════════ -->
+    <!-- EVENT ID 22: DNS Query → network_events                          -->
+    <!-- Exclude Windows telemetry/update noise, keep the interesting DNS  -->
+    <!-- ═════════════════════════════════════════════════════════════════ -->
+    <RuleGroup name="DnsQuery" groupRelation="or">
+      <DnsQuery onmatch="exclude">
+        <!-- Microsoft telemetry / update -->
+        <QueryName condition="end with">.microsoft.com</QueryName>
+        <QueryName condition="end with">.windowsupdate.com</QueryName>
+        <QueryName condition="end with">.windows.com</QueryName>
+        <QueryName condition="end with">.msftncsi.com</QueryName>
+        <QueryName condition="end with">.msftconnecttest.com</QueryName>
+        <QueryName condition="end with">.bing.com</QueryName>
+        <QueryName condition="end with">.office365.com</QueryName>
+        <QueryName condition="end with">.office.com</QueryName>
+        <QueryName condition="end with">.live.com</QueryName>
+        <QueryName condition="end with">.azure.com</QueryName>
+        <QueryName condition="end with">.gstatic.com</QueryName>
+        <QueryName condition="end with">.googleapis.com</QueryName>
+        <!-- Localhost -->
+        <QueryName condition="is">localhost</QueryName>
+      </DnsQuery>
+    </RuleGroup>
+
+    <!-- ═════════════════════════════════════════════════════════════════ -->
+    <!-- EVENT ID 23: File Delete (archived) → raw_logs                   -->
+    <!-- Log all file deletions with archive copy                         -->
+    <!-- ═════════════════════════════════════════════════════════════════ -->
+    <RuleGroup name="FileDelete" groupRelation="or">
+      <FileDelete onmatch="include">
+        <TargetFilename condition="end with">.exe</TargetFilename>
+        <TargetFilename condition="end with">.dll</TargetFilename>
+        <TargetFilename condition="end with">.ps1</TargetFilename>
+        <TargetFilename condition="end with">.bat</TargetFilename>
+        <TargetFilename condition="end with">.cmd</TargetFilename>
+        <TargetFilename condition="end with">.vbs</TargetFilename>
+        <TargetFilename condition="end with">.hta</TargetFilename>
+        <TargetFilename condition="contains">\Temp\</TargetFilename>
+      </FileDelete>
+    </RuleGroup>
+
+    <!-- ═════════════════════════════════════════════════════════════════ -->
+    <!-- EVENT ID 24: Clipboard Change → security_events                  -->
+    <!-- Useful for detecting credential theft via clipboard               -->
+    <!-- ═════════════════════════════════════════════════════════════════ -->
+    <RuleGroup name="ClipboardChange" groupRelation="or">
+      <ClipboardChange onmatch="include">
+        <!-- Only log clipboard access by suspicious processes -->
+        <Image condition="contains">\powershell.exe</Image>
+        <Image condition="contains">\cmd.exe</Image>
+        <Image condition="contains">\wscript.exe</Image>
+        <Image condition="contains">\cscript.exe</Image>
+        <Image condition="contains">\mshta.exe</Image>
+      </ClipboardChange>
+    </RuleGroup>
+
+    <!-- ═════════════════════════════════════════════════════════════════ -->
+    <!-- EVENT ID 25: Process Tampering → security_events                 -->
+    <!-- Detect process hollowing, herpaderping, ghosting                  -->
+    <!-- ═════════════════════════════════════════════════════════════════ -->
+    <RuleGroup name="ProcessTampering" groupRelation="or">
+      <ProcessTampering onmatch="exclude">
+        <!-- Exclude known-good signed Microsoft processes -->
+        <Image condition="is">C:\Windows\System32\svchost.exe</Image>
+        <Image condition="contains">\Microsoft\Edge\</Image>
+      </ProcessTampering>
+    </RuleGroup>
+
+    <!-- ═════════════════════════════════════════════════════════════════ -->
+    <!-- EVENT ID 26: File Delete Logged → raw_logs                       -->
+    <!-- Lightweight file deletion logging (no archive)                    -->
+    <!-- ═════════════════════════════════════════════════════════════════ -->
+    <RuleGroup name="FileDeleteDetected" groupRelation="or">
+      <FileDeleteDetected onmatch="include">
+        <TargetFilename condition="end with">.exe</TargetFilename>
+        <TargetFilename condition="end with">.dll</TargetFilename>
+        <TargetFilename condition="end with">.sys</TargetFilename>
+        <TargetFilename condition="end with">.ps1</TargetFilename>
+      </FileDeleteDetected>
+    </RuleGroup>
+
+  </EventFiltering>
+</Sysmon>

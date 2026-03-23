@@ -1,0 +1,92 @@
+# =============================================================================
+# CLIF — Prometheus Configuration (Production Grade)
+# =============================================================================
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+  scrape_timeout: 10s
+  external_labels:
+    cluster: 'clif-siem'
+    environment: 'production'
+
+# ── Alerting Rules ──────────────────────────────────────────────────────────
+rule_files:
+  - "/etc/prometheus/alert_rules.yml"
+
+scrape_configs:
+
+  # ── ClickHouse Node 1 ────────────────────────────────────────────────────
+  - job_name: "clickhouse-01"
+    static_configs:
+      - targets: ["clickhouse01:9363"]
+        labels:
+          node: "clickhouse01"
+          role: "replica_01"
+    metrics_path: /metrics
+
+  # ── ClickHouse Node 2 ────────────────────────────────────────────────────
+  - job_name: "clickhouse-02"
+    static_configs:
+      - targets: ["clickhouse02:9363"]
+        labels:
+          node: "clickhouse02"
+          role: "replica_02"
+    metrics_path: /metrics
+
+  # ── Redpanda Brokers ─────────────────────────────────────────────────────
+  - job_name: "redpanda"
+    static_configs:
+      - targets:
+          - "redpanda01:9644"
+          - "redpanda02:9644"
+          - "redpanda03:9644"
+    metrics_path: /public_metrics
+
+  # ── MinIO Cluster ───────────────────────────────────────────────────────
+  - job_name: "minio"
+    static_configs:
+      - targets: ["minio1:9000"]
+    metrics_path: /minio/v2/metrics/cluster
+
+  # ── MinIO Node-level Metrics ─────────────────────────────────────────────
+  - job_name: "minio-node"
+    static_configs:
+      - targets: ["minio1:9000"]
+    metrics_path: /minio/v2/metrics/node
+
+  # ── Vector ──────────────────────────────────────────────────────────────
+  - job_name: "vector"
+    static_configs:
+      - targets: ["clif-vector:9598"]
+        labels:
+          service: "vector"
+    metrics_path: /metrics
+
+  # ── Grafana ─────────────────────────────────────────────────────────────
+  - job_name: "grafana"
+    static_configs:
+      - targets: ["grafana:3000"]
+    metrics_path: /metrics
+
+  # ── Prometheus self ──────────────────────────────────────────────────────
+  - job_name: "prometheus"
+    static_configs:
+      - targets: ["localhost:9090"]
+
+  # ── LanceDB Service ────────────────────────────────────────────────────
+  - job_name: "lancedb"
+    static_configs:
+      - targets: ["clif-lancedb:8100"]
+        labels:
+          service: "lancedb"
+    metrics_path: /stats
+    scrape_interval: 30s
+
+  # ── Dashboard (Next.js) ────────────────────────────────────────────────
+  - job_name: "dashboard"
+    static_configs:
+      - targets: ["clif-dashboard:3001"]
+        labels:
+          service: "dashboard"
+    metrics_path: /api/system
+    scrape_interval: 30s

@@ -1,0 +1,62 @@
+# =============================================================================
+# PodDisruptionBudgets — Production Zero-Downtime Guarantees
+# =============================================================================
+# Prevents Kubernetes from evicting too many pods during node drain,
+# cluster upgrades, or voluntary disruptions.
+# =============================================================================
+
+# ── Redpanda PDB — At least 2 of 3 brokers must remain available ─────────────
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: redpanda-pdb
+  namespace: clif
+  labels:
+    app.kubernetes.io/name: redpanda
+spec:
+  minAvailable: 2
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: redpanda
+---
+# ── ClickHouse PDB — At least 1 of 2 replicas available ─────────────────────
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: clickhouse-pdb
+  namespace: clif
+  labels:
+    app.kubernetes.io/name: clickhouse
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: clickhouse
+---
+# ── MinIO PDB — At least 2 of 3 nodes for erasure coding ────────────────────
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: minio-pdb
+  namespace: clif
+  labels:
+    app.kubernetes.io/name: minio
+spec:
+  minAvailable: 2
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: minio
+---
+# ── Consumer PDB — Always keep at least 3 consumers running ─────────────────
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: consumer-pdb
+  namespace: clif
+  labels:
+    app.kubernetes.io/name: consumer
+spec:
+  minAvailable: 3
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: consumer

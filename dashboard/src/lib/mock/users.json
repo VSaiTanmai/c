@@ -1,0 +1,10 @@
+{
+  "users": [
+    {"id": "usr-001", "name": "Nethra", "email": "nethra@clif.internal", "role": "SOC Lead", "status": "Active", "lastLogin": "2026-02-11T10:45:00Z"},
+    {"id": "usr-002", "name": "Marcus Webb", "email": "m.webb@clif.internal", "role": "Senior Analyst", "status": "Active", "lastLogin": "2026-02-11T09:30:00Z"},
+    {"id": "usr-003", "name": "James Morton", "email": "j.morton@clif.internal", "role": "Analyst", "status": "Active", "lastLogin": "2026-02-11T10:20:00Z"},
+    {"id": "usr-004", "name": "Priya Patel", "email": "p.patel@clif.internal", "role": "Analyst", "status": "Active", "lastLogin": "2026-02-10T18:00:00Z"},
+    {"id": "usr-005", "name": "David Kim", "email": "d.kim@clif.internal", "role": "Admin", "status": "Active", "lastLogin": "2026-02-11T08:00:00Z"},
+    {"id": "usr-006", "name": "Elena Vasquez", "email": "e.vasquez@clif.internal", "role": "Viewer", "status": "Inactive", "lastLogin": "2026-02-05T14:00:00Z"}
+  ]
+}

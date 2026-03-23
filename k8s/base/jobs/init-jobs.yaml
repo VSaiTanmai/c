@@ -1,0 +1,170 @@
+# =============================================================================
+# MinIO Bucket Initializer — Creates S3 buckets then exits
+# =============================================================================
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: minio-init
+  namespace: clif
+  labels:
+    app.kubernetes.io/name: minio-init
+    app.kubernetes.io/component: init
+    app.kubernetes.io/part-of: clif-siem
+spec:
+  backoffLimit: 5
+  ttlSecondsAfterFinished: 300
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: minio-init
+    spec:
+      restartPolicy: OnFailure
+      initContainers:
+        - name: wait-minio
+          image: busybox:1.36
+          command:
+            - sh
+            - -c
+            - |
+              echo "Waiting for MinIO to be ready..."
+              until nc -z minio-headless.clif.svc.cluster.local 9000; do
+                echo "  MinIO not ready, retrying in 5s..."
+                sleep 5
+              done
+              echo "MinIO is reachable."
+      containers:
+        - name: mc
+          image: minio/mc:RELEASE.2024-08-26T10-49-58Z
+          command:
+            - /bin/sh
+            - -c
+            - |
+              set -e
+              mc alias set clif http://minio.clif.svc.cluster.local:9000 \
+                "$MINIO_ROOT_USER" "$MINIO_ROOT_PASSWORD"
+              mc mb --ignore-existing clif/clif-cold-logs
+              mc mb --ignore-existing clif/clif-backups
+              mc mb --ignore-existing clif/clif-evidence-archive
+              echo "MinIO buckets initialised."
+          env:
+            - name: MINIO_ROOT_USER
+              valueFrom:
+                secretKeyRef:
+                  name: clif-credentials
+                  key: MINIO_ROOT_USER
+            - name: MINIO_ROOT_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: clif-credentials
+                  key: MINIO_ROOT_PASSWORD
+---
+# =============================================================================
+# Redpanda Topic Initializer — Creates 14 topics then exits
+# =============================================================================
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: redpanda-init
+  namespace: clif
+  labels:
+    app.kubernetes.io/name: redpanda-init
+    app.kubernetes.io/component: init
+    app.kubernetes.io/part-of: clif-siem
+spec:
+  backoffLimit: 5
+  ttlSecondsAfterFinished: 300
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: redpanda-init
+    spec:
+      restartPolicy: OnFailure
+      initContainers:
+        - name: wait-redpanda
+          image: busybox:1.36
+          command:
+            - sh
+            - -c
+            - |
+              echo "Waiting for Redpanda brokers..."
+              until nc -z redpanda-0.redpanda-headless.clif.svc.cluster.local 9092; do
+                echo "  Broker not ready, retrying in 5s..."
+                sleep 5
+              done
+              echo "Redpanda broker-0 is reachable."
+      containers:
+        - name: rpk
+          image: redpandadata/redpanda:v24.2.8
+          command:
+            - /bin/bash
+            - -c
+            - |
+              set -e
+              BROKER="redpanda-0.redpanda-headless.clif.svc.cluster.local:9092"
+              PARTITIONS=${REDPANDA_PARTITIONS:-12}
+              RF=${REDPANDA_REPLICATION_FACTOR:-3}
+              RETENTION=${REDPANDA_LOG_RETENTION_MS:-604800000}
+              AGENT_P=$((PARTITIONS / 2))
+              [ "$AGENT_P" -lt 3 ] && AGENT_P=3
+
+              echo "── Creating ingestion topics ($PARTITIONS partitions) ──"
+              for TOPIC in raw-logs security-events process-events network-events; do
+                rpk topic create "$TOPIC" \
+                  --brokers "$BROKER" \
+                  --partitions "$PARTITIONS" \
+                  --replicas "$RF" \
+                  --topic-config retention.ms="$RETENTION" \
+                  --topic-config cleanup.policy=delete \
+                  --topic-config compression.type=producer \
+                  --topic-config max.message.bytes=10485760 || true
+                echo "  topic $TOPIC ready"
+              done
+
+              echo "── Creating triage pipeline topics ($PARTITIONS partitions) ──"
+              for TOPIC in templated-logs triage-scores anomaly-alerts; do
+                rpk topic create "$TOPIC" \
+                  --brokers "$BROKER" \
+                  --partitions "$PARTITIONS" \
+                  --replicas "$RF" \
+                  --topic-config retention.ms="$RETENTION" \
+                  --topic-config cleanup.policy=delete \
+                  --topic-config compression.type=producer \
+                  --topic-config max.message.bytes=10485760 || true
+                echo "  topic $TOPIC ready"
+              done
+
+              echo "── Creating agent pipeline topics ($AGENT_P partitions) ──"
+              for TOPIC in hunter-tasks hunter-results verifier-tasks verifier-results; do
+                rpk topic create "$TOPIC" \
+                  --brokers "$BROKER" \
+                  --partitions "$AGENT_P" \
+                  --replicas "$RF" \
+                  --topic-config retention.ms="$RETENTION" \
+                  --topic-config cleanup.policy=delete \
+                  --topic-config compression.type=producer \
+                  --topic-config max.message.bytes=10485760 || true
+                echo "  topic $TOPIC ready"
+              done
+
+              echo "── Creating operational topics (3 partitions) ──"
+              for TOPIC in feedback-labels dead-letter pipeline-commands; do
+                rpk topic create "$TOPIC" \
+                  --brokers "$BROKER" \
+                  --partitions 3 \
+                  --replicas "$RF" \
+                  --topic-config retention.ms="$((RETENTION * 4))" \
+                  --topic-config cleanup.policy=delete \
+                  --topic-config compression.type=producer \
+                  --topic-config max.message.bytes=10485760 || true
+                echo "  topic $TOPIC ready"
+              done
+
+              rpk topic list --brokers "$BROKER"
+              echo "All CLIF topics initialised (14 topics)."
+          env:
+            - name: REDPANDA_PARTITIONS
+              value: "12"
+            - name: REDPANDA_REPLICATION_FACTOR
+              value: "3"
+            - name: REDPANDA_LOG_RETENTION_MS
+              value: "604800000"

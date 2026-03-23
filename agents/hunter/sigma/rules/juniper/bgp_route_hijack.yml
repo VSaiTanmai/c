@@ -1,0 +1,24 @@
+title: Juniper BGP Route Hijack Attempt
+id: juniper-bgp-001
+status: production
+severity: critical
+category: juniper
+description: >
+  BGP UPDATE message announcing a prefix not owned by the expected AS
+  neighbour – possible route hijack or BGP session hijack.
+tags:
+  - attack.t1599
+  - attack.network_effects
+detection:
+  condition: or
+  keywords:
+    - "bgp update unexpected"
+    - "bgp prefix hijack"
+    - "invalid as_path"
+  clickhouse: |
+    SELECT count() > 0
+    FROM {database}.network_events
+    WHERE hostname = '{hostname}'
+      AND toString(src_ip) = '{source_ip}'
+      AND detection_rule ILIKE '%bgp%update%'
+      AND timestamp >= now() - INTERVAL {window_minutes} MINUTE

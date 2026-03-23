@@ -1,0 +1,790 @@
+# =============================================================================
+# CLIF — MacBook M1 Pure ML & Presentation Tier (8 CPU cores, 16 GB RAM)
+# =============================================================================
+# Runs: Triage Agent ×4, Hunter Agent, Verifier Agent, Merkle,
+#       Redpanda Console, Prometheus, Grafana.  Optional: LanceDB (--profile full)
+#
+# ┌─────────────────────────────────────────────────────────────────────────┐
+# │  Resource Budget  (Apple M1: 8 cores, 16 GB)                          │
+# │  CPUs:  10.0 / 8 cores (oversubscribed — fine for ML burst loads)     │
+# │  RAM:   12.3G limits / 5.3G reservations (16 GB available)            │
+# │  Headroom: ~3.7 GB free for macOS + Docker VM                         │
+# │                                                                        │
+# │  DATA FLOW: Agents consume from PC1 Redpanda, query PC1 ClickHouse   │
+# │             Vector now runs on PC1 for zero-hop ingestion.             │
+# │             This tier is PURE ML INFERENCE — compute-bound.            │
+# └─────────────────────────────────────────────────────────────────────────┘
+#
+# Usage:
+#   # First run setup (use PC1's LAN IP):
+#   ./cluster/setup-mac.sh          # auto-detects or prompts for PC1 IP
+#
+#   # Start:
+#   docker compose -f docker-compose.mac.yml --env-file .env --env-file cluster/.env up -d
+#
+#   # Start with LanceDB:
+#   docker compose -f docker-compose.mac.yml --env-file .env --env-file cluster/.env --profile full up -d
+#
+#   # Status:
+#   docker compose -f docker-compose.mac.yml ps
+#
+#   # Stop:
+#   docker compose -f docker-compose.mac.yml down
+# =============================================================================
+# IMPORTANT: Set DATA_IP in cluster/.env to PC1's LAN IP first!
+# =============================================================================
+
+x-logging: &default-logging
+  driver: json-file
+  options:
+    max-size: "50m"
+    max-file: "5"
+
+# ── PC1 host-alias anchor (resolves Docker hostnames to PC1's LAN IP) ──────
+x-pc1-hosts: &pc1-hosts
+  extra_hosts:
+    - "clickhouse01:${DATA_IP}"
+    - "clickhouse02:${DATA_IP}"
+    - "clickhouse-keeper:${DATA_IP}"
+    - "minio1:${DATA_IP}"
+    - "redpanda01:${DATA_IP}"
+    - "redpanda02:${DATA_IP}"
+    - "redpanda03:${DATA_IP}"
+
+networks:
+  clif-frontend:
+    driver: bridge
+  clif-backend:
+    driver: bridge
+
+volumes:
+  lancedb_data:
+  prometheus_data:
+  grafana_data:
+  hunter_models:
+
+services:
+
+  # =========================================================================
+  # Triage Agent 1 — 3-Model ML Ensemble (LightGBM ONNX + EIF + River ARF)
+  # =========================================================================
+  clif-triage-agent:
+    container_name: clif-triage-agent
+    build:
+      context: ./agents/triage
+      dockerfile: Dockerfile
+    <<: *pc1-hosts
+    environment:
+      KAFKA_BROKERS: "${DATA_IP}:17092,${DATA_IP}:29092,${DATA_IP}:39092"
+      CONSUMER_GROUP_ID: "clif-triage-agent"
+      INPUT_TOPICS: "raw-logs,security-events,process-events,network-events"
+      TOPIC_TEMPLATED_LOGS: "templated-logs"
+      TOPIC_TRIAGE_SCORES: "triage-scores"
+      TOPIC_ANOMALY_ALERTS: "anomaly-alerts"
+      TOPIC_HUNTER_TASKS: "hunter-tasks"
+      TOPIC_DEAD_LETTER: "dead-letter"
+      CLICKHOUSE_HOST: ${DATA_IP}
+      CLICKHOUSE_PORT: ${CLICKHOUSE_NATIVE_PORT:-9000}
+      CLICKHOUSE_USER: ${CLICKHOUSE_USER:-clif_admin}
+      CLICKHOUSE_PASSWORD: ${CLICKHOUSE_PASSWORD:-clif_secure_password_change_me}
+      CLICKHOUSE_DB: ${CLICKHOUSE_DB:-clif_logs}
+      DRAIN3_DEPTH: 4
+      DRAIN3_SIM_TH: 0.4
+      DRAIN3_MAX_CHILDREN: 100
+      DRAIN3_MAX_CLUSTERS: 1024
+      DRAIN3_CONFIG_PATH: /app/drain3.ini
+      DRAIN3_STATE_PATH: /app/drain3_state.bin
+      MODEL_DIR: /models
+      MODEL_LGBM_PATH: /models/lgbm_v6.0.0.onnx
+      MODEL_EIF_PATH: /models/eif_v6.0.0.pkl
+      MODEL_EIF_THRESHOLD_PATH: /models/eif_threshold.npy
+      MODEL_EIF_CALIBRATION_PATH: /models/eif_calibration.npz
+      MODEL_ARF_CHECKPOINT: /models/arf_v6.0.0.pkl
+      FEATURE_COLS_PATH: /models/feature_cols.pkl
+      MANIFEST_PATH: /models/manifest.json
+      SCORE_WEIGHTS: "lgbm=0.80,eif=0.12,arf=0.08"
+      KAFKA_OFFSET_RESET: "latest"
+      DEFAULT_SUSPICIOUS_THRESHOLD: "0.39"
+      DEFAULT_ANOMALOUS_THRESHOLD: "0.95"
+      DISAGREEMENT_THRESHOLD: "0.30"
+      DISAGREEMENT_ESCALATION_FLOOR: "0.75"
+      FEATURE_STALENESS_TIMEOUT_SEC: "300"
+      EIF_ANOMALY_OVERRIDE_THRESHOLD: "0.65"
+      EIF_ANOMALY_OVERRIDE_FLOOR: "0.45"
+      BATCH_SIZE: "500"
+      INFERENCE_WORKERS: "2"
+      CONN_TIME_WINDOW_SEC: "2.0"
+      CONN_HOST_WINDOW_SIZE: "100"
+      ARF_WARM_RESTART: "true"
+      ARF_REPLAY_HOURS: "24"
+      ARF_REPLAY_MAX_ROWS: "50000"
+      ARF_STREAM_CSV_PATH: "/models/features_arf_stream_features.csv"
+      ARF_N_MODELS: "10"
+      ARF_ADWIN_DELTA: "0.002"
+      ARF_ADWIN_WARNING_DELTA: "0.01"
+      ARF_SEED: "42"
+      ARF_CONFIDENCE_RAMP_SAMPLES: "10000"
+      ARF_LABEL_SOURCE: "lgbm_pseudo"
+      ARF_PSEUDO_LABEL_HIGH: "0.80"
+      ARF_PSEUDO_LABEL_LOW: "0.20"
+      SELFTEST_ENABLED: "true"
+      STARTUP_HEALTH_RETRIES: "30"
+      STARTUP_HEALTH_DELAY_SEC: "2.0"
+      LOG_LEVEL: INFO
+    volumes:
+      - ./agents/triage/models:/models:ro
+    ports:
+      - "8300:8300"
+    networks:
+      - clif-backend
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://localhost:8300/health')\""]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 45s
+    logging: *default-logging
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: '1.75'
+          memory: 2.25G
+        reservations:
+          cpus: '0.5'
+          memory: 768M
+
+  # ── Triage Agent 2 ──
+  clif-triage-agent-2:
+    container_name: clif-triage-agent-2
+    hostname: clif-triage-agent-2
+    build:
+      context: ./agents/triage
+      dockerfile: Dockerfile
+    <<: *pc1-hosts
+    environment:
+      KAFKA_BROKERS: "${DATA_IP}:17092,${DATA_IP}:29092,${DATA_IP}:39092"
+      CONSUMER_GROUP_ID: "clif-triage-agent"
+      INPUT_TOPICS: "raw-logs,security-events,process-events,network-events"
+      TOPIC_TEMPLATED_LOGS: "templated-logs"
+      TOPIC_TRIAGE_SCORES: "triage-scores"
+      TOPIC_ANOMALY_ALERTS: "anomaly-alerts"
+      TOPIC_HUNTER_TASKS: "hunter-tasks"
+      TOPIC_DEAD_LETTER: "dead-letter"
+      CLICKHOUSE_HOST: ${DATA_IP}
+      CLICKHOUSE_PORT: ${CLICKHOUSE_NATIVE_PORT:-9000}
+      CLICKHOUSE_USER: ${CLICKHOUSE_USER:-clif_admin}
+      CLICKHOUSE_PASSWORD: ${CLICKHOUSE_PASSWORD:-clif_secure_password_change_me}
+      CLICKHOUSE_DB: ${CLICKHOUSE_DB:-clif_logs}
+      DRAIN3_DEPTH: 4
+      DRAIN3_SIM_TH: 0.4
+      DRAIN3_MAX_CHILDREN: 100
+      DRAIN3_MAX_CLUSTERS: 1024
+      DRAIN3_CONFIG_PATH: /app/drain3.ini
+      DRAIN3_STATE_PATH: /app/drain3_state.bin
+      MODEL_DIR: /models
+      MODEL_LGBM_PATH: /models/lgbm_v6.0.0.onnx
+      MODEL_EIF_PATH: /models/eif_v6.0.0.pkl
+      MODEL_EIF_THRESHOLD_PATH: /models/eif_threshold.npy
+      MODEL_EIF_CALIBRATION_PATH: /models/eif_calibration.npz
+      MODEL_ARF_CHECKPOINT: /models/arf_v6.0.0.pkl
+      FEATURE_COLS_PATH: /models/feature_cols.pkl
+      MANIFEST_PATH: /models/manifest.json
+      SCORE_WEIGHTS: "lgbm=0.80,eif=0.12,arf=0.08"
+      KAFKA_OFFSET_RESET: "latest"
+      DEFAULT_SUSPICIOUS_THRESHOLD: "0.39"
+      DEFAULT_ANOMALOUS_THRESHOLD: "0.95"
+      DISAGREEMENT_THRESHOLD: "0.30"
+      DISAGREEMENT_ESCALATION_FLOOR: "0.75"
+      FEATURE_STALENESS_TIMEOUT_SEC: "300"
+      EIF_ANOMALY_OVERRIDE_THRESHOLD: "0.65"
+      EIF_ANOMALY_OVERRIDE_FLOOR: "0.45"
+      BATCH_SIZE: "500"
+      INFERENCE_WORKERS: "2"
+      CONN_TIME_WINDOW_SEC: "2.0"
+      CONN_HOST_WINDOW_SIZE: "100"
+      ARF_WARM_RESTART: "true"
+      ARF_REPLAY_HOURS: "24"
+      ARF_REPLAY_MAX_ROWS: "50000"
+      ARF_STREAM_CSV_PATH: "/models/features_arf_stream_features.csv"
+      ARF_N_MODELS: "10"
+      ARF_ADWIN_DELTA: "0.002"
+      ARF_ADWIN_WARNING_DELTA: "0.01"
+      ARF_SEED: "42"
+      ARF_CONFIDENCE_RAMP_SAMPLES: "10000"
+      ARF_LABEL_SOURCE: "lgbm_pseudo"
+      ARF_PSEUDO_LABEL_HIGH: "0.80"
+      ARF_PSEUDO_LABEL_LOW: "0.20"
+      SELFTEST_ENABLED: "true"
+      STARTUP_HEALTH_RETRIES: "30"
+      STARTUP_HEALTH_DELAY_SEC: "2.0"
+      LOG_LEVEL: INFO
+    volumes:
+      - ./agents/triage/models:/models:ro
+    ports:
+      - "8301:8300"
+    networks:
+      - clif-backend
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://localhost:8300/health')\""]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 45s
+    logging: *default-logging
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: '1.75'
+          memory: 2.25G
+        reservations:
+          cpus: '0.5'
+          memory: 768M
+
+  # ── Triage Agent 3 ──
+  clif-triage-agent-3:
+    container_name: clif-triage-agent-3
+    hostname: clif-triage-agent-3
+    build:
+      context: ./agents/triage
+      dockerfile: Dockerfile
+    <<: *pc1-hosts
+    environment:
+      KAFKA_BROKERS: "${DATA_IP}:17092,${DATA_IP}:29092,${DATA_IP}:39092"
+      CONSUMER_GROUP_ID: "clif-triage-agent"
+      INPUT_TOPICS: "raw-logs,security-events,process-events,network-events"
+      TOPIC_TEMPLATED_LOGS: "templated-logs"
+      TOPIC_TRIAGE_SCORES: "triage-scores"
+      TOPIC_ANOMALY_ALERTS: "anomaly-alerts"
+      TOPIC_HUNTER_TASKS: "hunter-tasks"
+      TOPIC_DEAD_LETTER: "dead-letter"
+      CLICKHOUSE_HOST: ${DATA_IP}
+      CLICKHOUSE_PORT: ${CLICKHOUSE_NATIVE_PORT:-9000}
+      CLICKHOUSE_USER: ${CLICKHOUSE_USER:-clif_admin}
+      CLICKHOUSE_PASSWORD: ${CLICKHOUSE_PASSWORD:-clif_secure_password_change_me}
+      CLICKHOUSE_DB: ${CLICKHOUSE_DB:-clif_logs}
+      DRAIN3_DEPTH: 4
+      DRAIN3_SIM_TH: 0.4
+      DRAIN3_MAX_CHILDREN: 100
+      DRAIN3_MAX_CLUSTERS: 1024
+      DRAIN3_CONFIG_PATH: /app/drain3.ini
+      DRAIN3_STATE_PATH: /app/drain3_state.bin
+      MODEL_DIR: /models
+      MODEL_LGBM_PATH: /models/lgbm_v6.0.0.onnx
+      MODEL_EIF_PATH: /models/eif_v6.0.0.pkl
+      MODEL_EIF_THRESHOLD_PATH: /models/eif_threshold.npy
+      MODEL_EIF_CALIBRATION_PATH: /models/eif_calibration.npz
+      MODEL_ARF_CHECKPOINT: /models/arf_v6.0.0.pkl
+      FEATURE_COLS_PATH: /models/feature_cols.pkl
+      MANIFEST_PATH: /models/manifest.json
+      SCORE_WEIGHTS: "lgbm=0.80,eif=0.12,arf=0.08"
+      KAFKA_OFFSET_RESET: "latest"
+      DEFAULT_SUSPICIOUS_THRESHOLD: "0.39"
+      DEFAULT_ANOMALOUS_THRESHOLD: "0.95"
+      DISAGREEMENT_THRESHOLD: "0.30"
+      DISAGREEMENT_ESCALATION_FLOOR: "0.75"
+      FEATURE_STALENESS_TIMEOUT_SEC: "300"
+      EIF_ANOMALY_OVERRIDE_THRESHOLD: "0.65"
+      EIF_ANOMALY_OVERRIDE_FLOOR: "0.45"
+      BATCH_SIZE: "500"
+      INFERENCE_WORKERS: "2"
+      CONN_TIME_WINDOW_SEC: "2.0"
+      CONN_HOST_WINDOW_SIZE: "100"
+      ARF_WARM_RESTART: "true"
+      ARF_REPLAY_HOURS: "24"
+      ARF_REPLAY_MAX_ROWS: "50000"
+      ARF_STREAM_CSV_PATH: "/models/features_arf_stream_features.csv"
+      ARF_N_MODELS: "10"
+      ARF_ADWIN_DELTA: "0.002"
+      ARF_ADWIN_WARNING_DELTA: "0.01"
+      ARF_SEED: "42"
+      ARF_CONFIDENCE_RAMP_SAMPLES: "10000"
+      ARF_LABEL_SOURCE: "lgbm_pseudo"
+      ARF_PSEUDO_LABEL_HIGH: "0.80"
+      ARF_PSEUDO_LABEL_LOW: "0.20"
+      SELFTEST_ENABLED: "true"
+      STARTUP_HEALTH_RETRIES: "30"
+      STARTUP_HEALTH_DELAY_SEC: "2.0"
+      LOG_LEVEL: INFO
+    volumes:
+      - ./agents/triage/models:/models:ro
+    ports:
+      - "8302:8300"
+    networks:
+      - clif-backend
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://localhost:8300/health')\""]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 45s
+    logging: *default-logging
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: '1.75'
+          memory: 2.25G
+        reservations:
+          cpus: '0.5'
+          memory: 768M
+
+  # ── Triage Agent 4 ──
+  clif-triage-agent-4:
+    container_name: clif-triage-agent-4
+    hostname: clif-triage-agent-4
+    build:
+      context: ./agents/triage
+      dockerfile: Dockerfile
+    <<: *pc1-hosts
+    environment:
+      KAFKA_BROKERS: "${DATA_IP}:17092,${DATA_IP}:29092,${DATA_IP}:39092"
+      CONSUMER_GROUP_ID: "clif-triage-agent"
+      INPUT_TOPICS: "raw-logs,security-events,process-events,network-events"
+      TOPIC_TEMPLATED_LOGS: "templated-logs"
+      TOPIC_TRIAGE_SCORES: "triage-scores"
+      TOPIC_ANOMALY_ALERTS: "anomaly-alerts"
+      TOPIC_HUNTER_TASKS: "hunter-tasks"
+      TOPIC_DEAD_LETTER: "dead-letter"
+      CLICKHOUSE_HOST: ${DATA_IP}
+      CLICKHOUSE_PORT: ${CLICKHOUSE_NATIVE_PORT:-9000}
+      CLICKHOUSE_USER: ${CLICKHOUSE_USER:-clif_admin}
+      CLICKHOUSE_PASSWORD: ${CLICKHOUSE_PASSWORD:-clif_secure_password_change_me}
+      CLICKHOUSE_DB: ${CLICKHOUSE_DB:-clif_logs}
+      DRAIN3_DEPTH: 4
+      DRAIN3_SIM_TH: 0.4
+      DRAIN3_MAX_CHILDREN: 100
+      DRAIN3_MAX_CLUSTERS: 1024
+      DRAIN3_CONFIG_PATH: /app/drain3.ini
+      DRAIN3_STATE_PATH: /app/drain3_state.bin
+      MODEL_DIR: /models
+      MODEL_LGBM_PATH: /models/lgbm_v6.0.0.onnx
+      MODEL_EIF_PATH: /models/eif_v6.0.0.pkl
+      MODEL_EIF_THRESHOLD_PATH: /models/eif_threshold.npy
+      MODEL_EIF_CALIBRATION_PATH: /models/eif_calibration.npz
+      MODEL_ARF_CHECKPOINT: /models/arf_v6.0.0.pkl
+      FEATURE_COLS_PATH: /models/feature_cols.pkl
+      MANIFEST_PATH: /models/manifest.json
+      SCORE_WEIGHTS: "lgbm=0.80,eif=0.12,arf=0.08"
+      KAFKA_OFFSET_RESET: "latest"
+      DEFAULT_SUSPICIOUS_THRESHOLD: "0.39"
+      DEFAULT_ANOMALOUS_THRESHOLD: "0.95"
+      DISAGREEMENT_THRESHOLD: "0.30"
+      DISAGREEMENT_ESCALATION_FLOOR: "0.75"
+      FEATURE_STALENESS_TIMEOUT_SEC: "300"
+      EIF_ANOMALY_OVERRIDE_THRESHOLD: "0.65"
+      EIF_ANOMALY_OVERRIDE_FLOOR: "0.45"
+      BATCH_SIZE: "500"
+      INFERENCE_WORKERS: "2"
+      CONN_TIME_WINDOW_SEC: "2.0"
+      CONN_HOST_WINDOW_SIZE: "100"
+      ARF_WARM_RESTART: "true"
+      ARF_REPLAY_HOURS: "24"
+      ARF_REPLAY_MAX_ROWS: "50000"
+      ARF_STREAM_CSV_PATH: "/models/features_arf_stream_features.csv"
+      ARF_N_MODELS: "10"
+      ARF_ADWIN_DELTA: "0.002"
+      ARF_ADWIN_WARNING_DELTA: "0.01"
+      ARF_SEED: "42"
+      ARF_CONFIDENCE_RAMP_SAMPLES: "10000"
+      ARF_LABEL_SOURCE: "lgbm_pseudo"
+      ARF_PSEUDO_LABEL_HIGH: "0.80"
+      ARF_PSEUDO_LABEL_LOW: "0.20"
+      SELFTEST_ENABLED: "true"
+      STARTUP_HEALTH_RETRIES: "30"
+      STARTUP_HEALTH_DELAY_SEC: "2.0"
+      LOG_LEVEL: INFO
+    volumes:
+      - ./agents/triage/models:/models:ro
+    ports:
+      - "8303:8300"
+    networks:
+      - clif-backend
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://localhost:8300/health')\""]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 45s
+    logging: *default-logging
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: '1.75'
+          memory: 2.25G
+        reservations:
+          cpus: '0.5'
+          memory: 768M
+
+  # =========================================================================
+  # Hunter Agent — Triple-Layer Investigation Pipeline
+  # =========================================================================
+  clif-hunter-agent:
+    container_name: clif-hunter-agent
+    hostname: clif-hunter-agent
+    build:
+      context: ./agents/hunter
+      dockerfile: Dockerfile
+    <<: *pc1-hosts
+    depends_on:
+      lancedb:
+        condition: service_healthy
+    environment:
+      KAFKA_BROKERS: "${DATA_IP}:17092,${DATA_IP}:29092,${DATA_IP}:39092"
+      CONSUMER_GROUP_ID: "clif-hunter-agent"
+      TOPIC_HUNTER_TASKS: "hunter-tasks"
+      TOPIC_HUNTER_RESULTS: "hunter-results"
+      TOPIC_DEAD_LETTER: "dead-letter"
+      CLICKHOUSE_HOST: ${DATA_IP}
+      CLICKHOUSE_PORT: ${CLICKHOUSE_HTTP_PORT:-8123}
+      CLICKHOUSE_USER: ${CLICKHOUSE_USER:-clif_admin}
+      CLICKHOUSE_PASSWORD: ${CLICKHOUSE_PASSWORD:-Cl1f_Ch@ngeM3_2026!}
+      CLICKHOUSE_DB: ${CLICKHOUSE_DB:-clif_logs}
+      LANCEDB_URL: "http://lancedb:8100"
+      LANCEDB_TIMEOUT_SEC: "3.0"
+      LANCEDB_BACKOFF_SEC: "60.0"
+      HUNTER_PORT: "8400"
+      HUNTER_SCORE_GATE: "0.70"
+      INVESTIGATION_WINDOW_MIN: "15"
+      HUNTER_CONCURRENCY: "8"
+      DEDUP_WINDOW_SEC: "300"
+      KAFKA_MAX_POLL_RECORDS: "100"
+      SIGMA_RULES_DIR: "/app/sigma/rules"
+      CATBOOST_MODEL_PATH: "/app/models/hunter_catboost.cbm"
+      MIN_TRAINING_SAMPLES: "100"
+      RETRAIN_INTERVAL_SEC: "21600"
+      SPC_BASELINE_REFRESH_SEC: "60"
+      SPC_WINDOW_HOURS: "24"
+      BATCH_SIZE: "100"
+      LOG_LEVEL: INFO
+    volumes:
+      - hunter_models:/app/models
+    ports:
+      - "8400:8400"
+    networks:
+      - clif-backend
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://localhost:8400/health')\""]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 60s
+    logging: *default-logging
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: '1.75'
+          memory: 2G
+        reservations:
+          cpus: '0.5'
+          memory: 512M
+
+  # =========================================================================
+  # Verifier Agent — Forensic Verification & Explainability AI (XAI)
+  # =========================================================================
+  clif-verifier-agent:
+    container_name: clif-verifier-agent
+    hostname: clif-verifier-agent
+    build:
+      context: ./agents/verifier
+      dockerfile: Dockerfile
+    <<: *pc1-hosts
+    depends_on:
+      lancedb:
+        condition: service_healthy
+    environment:
+      KAFKA_BROKERS: "${DATA_IP}:17092,${DATA_IP}:29092,${DATA_IP}:39092"
+      CONSUMER_GROUP_ID: "clif-verifier-agent"
+      TOPIC_INPUT: "hunter-results"
+      TOPIC_OUTPUT: "verifier-results"
+      CLIF_HMAC_KEY: ${CLIF_HMAC_KEY:-clif-default-hmac-key-change-me}
+      CLICKHOUSE_HOST: ${DATA_IP}
+      CLICKHOUSE_PORT: ${CLICKHOUSE_HTTP_PORT:-8123}
+      CLICKHOUSE_USER: ${CLICKHOUSE_USER:-clif_admin}
+      CLICKHOUSE_PASSWORD: ${CLICKHOUSE_PASSWORD:-Cl1f_Ch@ngeM3_2026!}
+      CLICKHOUSE_DATABASE: ${CLICKHOUSE_DB:-clif_logs}
+      LANCEDB_URL: "http://lancedb:8100"
+      VERIFIER_PORT: "8500"
+      SKIP_NEGATIVE_VERDICTS: "true"
+      TIMELINE_WINDOW_HOURS: "24"
+      FP_SIMILARITY_THRESHOLD: "0.3"
+      IOC_LOOKBACK_HOURS: "72"
+      EVIDENCE_LOOKBACK_HOURS: "2"
+      LOG_LEVEL: INFO
+    ports:
+      - "8500:8500"
+    networks:
+      - clif-backend
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://localhost:8500/health')\""]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 60s
+    logging: *default-logging
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: 512M
+        reservations:
+          cpus: '0.25'
+          memory: 128M
+
+  # =========================================================================
+  # XAI Backend Service — SHAP explainability API for the dashboard (port 8200)
+  # =========================================================================
+  clif-xai-service:
+    container_name: clif-xai-service
+    hostname: clif-xai-service
+    build:
+      context: ./agents/xai-service
+      dockerfile: Dockerfile
+    environment:
+      MODEL_DIR: /models
+      MODEL_LGBM_PATH: /models/lgbm_v6.0.0.onnx
+      FEATURE_COLS_PATH: /models/feature_cols.pkl
+      MANIFEST_PATH: /models/manifest.json
+      LGBM_TXT_PATH: /models/lgbm_v6.0.0.txt
+      SHAP_TOP_K: "10"
+      XAI_HOST: "0.0.0.0"
+      XAI_PORT: "8200"
+      LOG_LEVEL: INFO
+    ports:
+      - "8200:8200"
+    volumes:
+      - ./agents/triage/models:/models:ro
+    networks:
+      - clif-backend
+      - clif-frontend
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://localhost:8200/health')\""]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
+    logging: *default-logging
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 512M
+        reservations:
+          cpus: '0.1'
+          memory: 128M
+
+  # =========================================================================
+  # Merkle Evidence Chain Service
+  # =========================================================================
+  clif-merkle:
+    build:
+      context: ./merkle-service
+      dockerfile: Dockerfile
+    container_name: clif-merkle
+    hostname: clif-merkle
+    <<: *pc1-hosts
+    environment:
+      CLICKHOUSE_HOST: ${DATA_IP}
+      CLICKHOUSE_PORT: 9000
+      CLICKHOUSE_USER: ${CLICKHOUSE_USER:-clif_admin}
+      CLICKHOUSE_PASSWORD: ${CLICKHOUSE_PASSWORD:-clif_secure_password_change_me}
+      CLICKHOUSE_DB: ${CLICKHOUSE_DB:-clif_logs}
+      MINIO_ENDPOINT: "http://${DATA_IP}:${MINIO_DATA_PORT:-9002}"
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-clif_minio_admin}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-clif_minio_secret_change_me}
+      MINIO_BUCKET_EVIDENCE: ${MINIO_BUCKET_EVIDENCE:-clif-evidence-archive}
+      MERKLE_BATCH_WINDOW: ${MERKLE_BATCH_WINDOW:-1800}
+      MERKLE_DAEMON_INTERVAL: ${MERKLE_DAEMON_INTERVAL:-30}
+      LOG_LEVEL: INFO
+    networks:
+      - clif-backend
+    healthcheck:
+      test: ["CMD-SHELL", "python -c 'import socket; s=socket.socket(); s.settimeout(2); s.connect((\"clickhouse01\",9000)); s.close()' || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
+    logging: *default-logging
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 256M
+        reservations:
+          cpus: '0.1'
+          memory: 128M
+
+  # =========================================================================
+  # LanceDB — Semantic Vector Search & RAG Engine
+  # =========================================================================
+  lancedb:
+    container_name: clif-lancedb
+    build:
+      context: ./lancedb-service
+      dockerfile: Dockerfile
+    <<: *pc1-hosts
+    environment:
+      LANCEDB_PATH: /data/lancedb
+      EMBEDDING_MODEL: all-MiniLM-L6-v2
+      EMBEDDING_BATCH_SIZE: 256
+      EMBEDDING_DIM: 384
+      CLICKHOUSE_HOST: ${DATA_IP}
+      CLICKHOUSE_PORT: ${CLICKHOUSE_NATIVE_PORT:-9000}
+      CLICKHOUSE_USER: ${CLICKHOUSE_USER:-clif_admin}
+      CLICKHOUSE_PASSWORD: ${CLICKHOUSE_PASSWORD:-clif_secure_password_change_me}
+      CLICKHOUSE_DB: ${CLICKHOUSE_DB:-clif_logs}
+      SYNC_INTERVAL_SEC: 30
+      SYNC_BATCH_SIZE: 1000
+      API_HOST: 0.0.0.0
+      API_PORT: 8100
+      LOG_LEVEL: INFO
+      CORS_ORIGINS: "http://localhost:3001,http://clif-dashboard:3001"
+    ports:
+      - "8100:8100"
+    volumes:
+      - lancedb_data:/data/lancedb
+    networks:
+      - clif-backend
+      - clif-frontend
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:8100/health || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 60s
+    logging: *default-logging
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: '1'
+          memory: 2G
+        reservations:
+          cpus: '0.5'
+          memory: 768M
+
+  # =========================================================================
+  # Redpanda Console (web UI — connects to PC1 brokers)
+  # =========================================================================
+  redpanda-console:
+    image: redpandadata/console:v2.7.2
+    container_name: clif-redpanda-console
+    hostname: redpanda-console
+    extra_hosts:
+      - "pc1-rp01:${DATA_IP}"
+      - "pc1-rp02:${DATA_IP}"
+      - "pc1-rp03:${DATA_IP}"
+    ports:
+      - "8080:8080"
+    environment:
+      CONFIG_FILEPATH: /tmp/config.yml
+    volumes:
+      - ./cluster/redpanda/console-config.yml:/tmp/config.yml:ro
+    networks:
+      - clif-frontend
+      - clif-backend
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:8080/admin/health || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 20s
+    logging: *default-logging
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: '0.25'
+          memory: 256M
+
+  # =========================================================================
+  # Prometheus (scrapes both PC1 data tier & local compute tier)
+  # =========================================================================
+  prometheus:
+    image: prom/prometheus:v2.54.0
+    container_name: clif-prometheus
+    hostname: prometheus
+    extra_hosts:
+      - "clickhouse01:${DATA_IP}"
+      - "clickhouse02:${DATA_IP}"
+      - "clickhouse-keeper:${DATA_IP}"
+      - "minio1:${DATA_IP}"
+      - "redpanda01:${DATA_IP}"
+      - "redpanda02:${DATA_IP}"
+      - "redpanda03:${DATA_IP}"
+    ports:
+      - "${PROMETHEUS_PORT:-9090}:9090"
+    volumes:
+      - ./cluster/monitoring/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./monitoring/alert_rules.yml:/etc/prometheus/alert_rules.yml:ro
+      - prometheus_data:/prometheus
+    command:
+      - "--config.file=/etc/prometheus/prometheus.yml"
+      - "--storage.tsdb.retention.time=7d"
+      - "--web.enable-lifecycle"
+    networks:
+      - clif-frontend
+      - clif-backend
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:9090/-/healthy || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    logging: *default-logging
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 512M
+        reservations:
+          cpus: '0.1'
+          memory: 256M
+
+  # =========================================================================
+  # Grafana
+  # =========================================================================
+  grafana:
+    image: grafana/grafana:11.1.4
+    container_name: clif-grafana
+    hostname: grafana
+    extra_hosts:
+      - "clickhouse01:${DATA_IP}"
+    ports:
+      - "${GRAFANA_PORT:-3002}:3000"
+    environment:
+      GF_SECURITY_ADMIN_USER: ${GRAFANA_ADMIN_USER:-admin}
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:-clif_grafana_change_me}
+      GF_DASHBOARDS_DEFAULT_HOME_DASHBOARD_PATH: /var/lib/grafana/dashboards/clif-overview.json
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - ./monitoring/grafana-dashboard.json:/var/lib/grafana/dashboards/clif-overview.json:ro
+      - ./cluster/monitoring/grafana-datasources.yml:/etc/grafana/provisioning/datasources/datasources.yml:ro
+      - ./monitoring/grafana-dashboards.yml:/etc/grafana/provisioning/dashboards/dashboards.yml:ro
+    networks:
+      - clif-frontend
+    depends_on:
+      - prometheus
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:3000/api/health || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+    logging: *default-logging
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: '0.25'
+          memory: 256M
+        reservations:
+          cpus: '0.1'
+          memory: 128M

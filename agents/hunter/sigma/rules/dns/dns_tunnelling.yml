@@ -1,0 +1,25 @@
+title: Suspicious DNS Tunnelling Activity
+id: dns-tunnel-001
+status: production
+severity: high
+category: dns
+description: >
+  Unusually long DNS query names or high-frequency DNS lookups to a single
+  domain, indicative of DNS tunnelling or C2 channel via DNS.
+tags:
+  - attack.t1071.004
+  - attack.command_and_control
+detection:
+  condition: or
+  keywords:
+    - "dns tunnel"
+    - "nxdomain flood"
+    - "txt record exfil"
+  clickhouse: |
+    SELECT count() > 20
+    FROM {database}.network_events
+    WHERE hostname = '{hostname}'
+      AND toString(src_ip) = '{source_ip}'
+      AND protocol = 'DNS'
+      AND length(dns_query) > 120
+      AND timestamp >= now() - INTERVAL {window_minutes} MINUTE

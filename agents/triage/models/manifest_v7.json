@@ -1,0 +1,151 @@
+{
+  "version": "7.0.0",
+  "created": "2026-03-14T22:36:23.476970+00:00",
+  "features": [
+    "hour_of_day",
+    "day_of_week",
+    "is_off_hours",
+    "severity_numeric",
+    "event_id_risk_score",
+    "action_type",
+    "is_admin_action",
+    "has_known_ioc",
+    "entity_event_rate",
+    "entity_error_rate",
+    "entity_unique_actions",
+    "source_novelty",
+    "dst_port",
+    "protocol_numeric",
+    "byte_ratio",
+    "total_bytes_log",
+    "conn_rate_fast",
+    "conn_rate_slow",
+    "rate_acceleration",
+    "port_entropy",
+    "message_entropy",
+    "message_length_log",
+    "numeric_ratio",
+    "special_char_ratio",
+    "keyword_threat_score",
+    "template_novelty",
+    "host_score_baseline_z",
+    "user_score_baseline_z",
+    "kill_chain_stage",
+    "kill_chain_velocity",
+    "cross_host_correlation",
+    "dns_query_entropy"
+  ],
+  "num_features": 32,
+  "models": {
+    "lgbm": {
+      "file": "lgbm_v7.onnx",
+      "weight": 0.85,
+      "type": "supervised"
+    },
+    "autoencoder": {
+      "file": "autoencoder_v7.onnx",
+      "weight": 0.15,
+      "type": "unsupervised",
+      "architecture": "32-64-32-16-8-16-32-64-32"
+    }
+  },
+  "scaler": "feature_scaler_v7.json",
+  "calibration": "ae_calibration_v7.json",
+  "training": {
+    "total_samples": 366961,
+    "normal_samples": 259212,
+    "attack_samples": 107749,
+    "source_types": {
+      "01_Syslog": {
+        "total": 50500,
+        "normal": 49850,
+        "attack": 650
+      },
+      "02_Windows": {
+        "total": 18532,
+        "normal": 13899,
+        "attack": 4633
+      },
+      "03_Firewall": {
+        "total": 20233,
+        "normal": 10000,
+        "attack": 10233
+      },
+      "04_AD": {
+        "total": 50500,
+        "normal": 49902,
+        "attack": 598
+      },
+      "05_DNS": {
+        "total": 45589,
+        "normal": 6250,
+        "attack": 39339
+      },
+      "06_Cloud": {
+        "total": 50000,
+        "normal": 49964,
+        "attack": 36
+      },
+      "07_K8s": {
+        "total": 20000,
+        "normal": 15000,
+        "attack": 5000
+      },
+      "08_Web": {
+        "total": 50000,
+        "normal": 36000,
+        "attack": 14000
+      },
+      "09_NetFlow": {
+        "total": 12000,
+        "normal": 10000,
+        "attack": 2000
+      },
+      "10_IDS": {
+        "total": 49607,
+        "normal": 18347,
+        "attack": 31260
+      }
+    },
+    "cv_metrics": {
+      "cv_f1_mean": 0.9575740004931468,
+      "cv_f1_std": 0.0008119855395407695,
+      "folds": [
+        {
+          "fold": 1,
+          "f1": 0.9560749137950463,
+          "precision": 0.9294509443056833,
+          "recall": 0.9842691415313225
+        },
+        {
+          "fold": 2,
+          "f1": 0.9584454950573439,
+          "precision": 0.9349898490599347,
+          "recall": 0.9831082648846814
+        },
+        {
+          "fold": 3,
+          "f1": 0.9581081997603599,
+          "precision": 0.9341797822157563,
+          "recall": 0.9832946635730858
+        },
+        {
+          "fold": 4,
+          "f1": 0.9576133176513164,
+          "precision": 0.9341187891624746,
+          "recall": 0.9823201856148492
+        },
+        {
+          "fold": 5,
+          "f1": 0.9576280762016678,
+          "precision": 0.9333509537024801,
+          "recall": 0.9832018561484919
+        }
+      ]
+    }
+  },
+  "thresholds": {
+    "suspicious": 0.4,
+    "anomalous": 0.9
+  }
+}

@@ -1,0 +1,185 @@
+# =============================================================================
+# Hunter Agent — Deep Anomaly Investigation
+# =============================================================================
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: hunter-agent
+  namespace: clif
+  labels:
+    app.kubernetes.io/name: hunter-agent
+    app.kubernetes.io/component: ai-agent
+    app.kubernetes.io/part-of: clif-siem
+    tier: compute
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: hunter-agent
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: hunter-agent
+        app.kubernetes.io/component: ai-agent
+        tier: compute
+    spec:
+      nodeSelector:
+        clif/tier: compute
+      containers:
+        - name: hunter-agent
+          image: ghcr.io/clif-siem/hunter-agent:latest    # Built from agents/hunter/
+          ports:
+            - name: health
+              containerPort: 8400
+          env:
+            - name: KAFKA_BROKERS
+              value: "redpanda-0.redpanda-headless.clif.svc.cluster.local:9092,redpanda-1.redpanda-headless.clif.svc.cluster.local:9092,redpanda-2.redpanda-headless.clif.svc.cluster.local:9092"
+            - name: CONSUMER_GROUP_ID
+              value: clif-hunter-agent
+            - name: INPUT_TOPICS
+              value: hunter-tasks
+            - name: TOPIC_HUNTER_RESULTS
+              value: hunter-results
+            - name: TOPIC_VERIFIER_TASKS
+              value: verifier-tasks
+            - name: TOPIC_DEAD_LETTER
+              value: dead-letter
+            - name: CLICKHOUSE_HOST
+              value: clickhouse-headless.clif.svc.cluster.local
+            - name: CLICKHOUSE_PORT
+              value: "9000"
+            - name: CLICKHOUSE_USER
+              valueFrom:
+                secretKeyRef:
+                  name: clif-credentials
+                  key: CLICKHOUSE_USER
+            - name: CLICKHOUSE_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: clif-credentials
+                  key: CLICKHOUSE_PASSWORD
+            - name: CLICKHOUSE_DB
+              valueFrom:
+                secretKeyRef:
+                  name: clif-credentials
+                  key: CLICKHOUSE_DB
+            - name: CORRELATION_WINDOW_MINUTES
+              value: "30"
+            - name: MAX_CORRELATED_EVENTS
+              value: "1000"
+            - name: INVESTIGATION_TIMEOUT_SEC
+              value: "120"
+            - name: LOG_LEVEL
+              value: INFO
+          resources:
+            requests:
+              cpu: 500m
+              memory: 512Mi
+            limits:
+              cpu: "2"
+              memory: 3Gi
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: health
+            periodSeconds: 30
+            timeoutSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: health
+            initialDelaySeconds: 30
+            periodSeconds: 30
+---
+# =============================================================================
+# Verifier Agent — Forensic Evidence Verification
+# =============================================================================
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: verifier-agent
+  namespace: clif
+  labels:
+    app.kubernetes.io/name: verifier-agent
+    app.kubernetes.io/component: ai-agent
+    app.kubernetes.io/part-of: clif-siem
+    tier: compute
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: verifier-agent
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: verifier-agent
+        app.kubernetes.io/component: ai-agent
+        tier: compute
+    spec:
+      nodeSelector:
+        clif/tier: compute
+      containers:
+        - name: verifier-agent
+          image: ghcr.io/clif-siem/verifier-agent:latest    # Built from agents/verifier/
+          ports:
+            - name: health
+              containerPort: 8500
+          env:
+            - name: KAFKA_BROKERS
+              value: "redpanda-0.redpanda-headless.clif.svc.cluster.local:9092,redpanda-1.redpanda-headless.clif.svc.cluster.local:9092,redpanda-2.redpanda-headless.clif.svc.cluster.local:9092"
+            - name: CONSUMER_GROUP_ID
+              value: clif-verifier-agent
+            - name: INPUT_TOPICS
+              value: verifier-tasks
+            - name: TOPIC_VERIFIER_RESULTS
+              value: verifier-results
+            - name: TOPIC_FEEDBACK_LABELS
+              value: feedback-labels
+            - name: TOPIC_DEAD_LETTER
+              value: dead-letter
+            - name: CLICKHOUSE_HOST
+              value: clickhouse-headless.clif.svc.cluster.local
+            - name: CLICKHOUSE_PORT
+              value: "9000"
+            - name: CLICKHOUSE_USER
+              valueFrom:
+                secretKeyRef:
+                  name: clif-credentials
+                  key: CLICKHOUSE_USER
+            - name: CLICKHOUSE_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: clif-credentials
+                  key: CLICKHOUSE_PASSWORD
+            - name: CLICKHOUSE_DB
+              valueFrom:
+                secretKeyRef:
+                  name: clif-credentials
+                  key: CLICKHOUSE_DB
+            - name: MERKLE_SERVICE_URL
+              value: "http://merkle.clif.svc.cluster.local:9400"
+            - name: IOC_CACHE_TABLE
+              value: ioc_cache
+            - name: EVIDENCE_CHAIN_VERIFY
+              value: "true"
+            - name: LOG_LEVEL
+              value: INFO
+          resources:
+            requests:
+              cpu: 500m
+              memory: 512Mi
+            limits:
+              cpu: "2"
+              memory: 2Gi
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: health
+            periodSeconds: 30
+            timeoutSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: health
+            initialDelaySeconds: 30
+            periodSeconds: 30

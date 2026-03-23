@@ -1,0 +1,107 @@
+<clickhouse>
+    <listen_host>0.0.0.0</listen_host>
+
+    <!-- Inter-server replication port -->
+    <interserver_http_port>9009</interserver_http_port>
+
+    <!-- ================================================================= -->
+    <!-- Server-Wide Resource Limits                                       -->
+    <!-- ================================================================= -->
+    <max_concurrent_queries>200</max_concurrent_queries>
+    <max_server_memory_usage_to_ram_ratio>0.8</max_server_memory_usage_to_ram_ratio>
+    <max_table_size_to_drop>0</max_table_size_to_drop>
+    <max_partition_size_to_drop>0</max_partition_size_to_drop>
+
+    <!-- ================================================================= -->
+    <!-- Logging — structured query and part logs                          -->
+    <!-- ================================================================= -->
+    <query_log>
+        <database>system</database>
+        <table>query_log</table>
+        <partition_by>toYYYYMM(event_date)</partition_by>
+        <flush_interval_milliseconds>7500</flush_interval_milliseconds>
+    </query_log>
+    <part_log>
+        <database>system</database>
+        <table>part_log</table>
+        <partition_by>toYYYYMM(event_date)</partition_by>
+        <flush_interval_milliseconds>7500</flush_interval_milliseconds>
+    </part_log>
+    <metric_log>
+        <database>system</database>
+        <table>metric_log</table>
+        <collect_interval_milliseconds>1000</collect_interval_milliseconds>
+    </metric_log>
+
+    <!-- ================================================================= -->
+    <!-- MergeTree Engine Tuning                                           -->
+    <!-- ================================================================= -->
+    <merge_tree>
+        <parts_to_delay_insert>300</parts_to_delay_insert>
+        <parts_to_throw_insert>600</parts_to_throw_insert>
+        <max_bytes_to_merge_at_max_space_in_pool>161061273600</max_bytes_to_merge_at_max_space_in_pool>
+        <number_of_free_entries_in_pool_to_execute_mutation>20</number_of_free_entries_in_pool_to_execute_mutation>
+        <max_suspicious_broken_parts>100</max_suspicious_broken_parts>
+    </merge_tree>
+
+    <!-- ================================================================= -->
+    <!-- Background Pool Sizing                                            -->
+    <!-- ================================================================= -->
+    <background_pool_size>16</background_pool_size>
+    <background_move_pool_size>2</background_move_pool_size>
+    <background_merges_mutations_concurrency_ratio>2</background_merges_mutations_concurrency_ratio>
+    <background_schedule_pool_size>16</background_schedule_pool_size>
+    <background_fetches_pool_size>8</background_fetches_pool_size>
+    <background_common_pool_size>8</background_common_pool_size>
+    <background_buffer_flush_schedule_pool_size>16</background_buffer_flush_schedule_pool_size>
+
+    <!-- ================================================================= -->
+    <!-- Mark / Uncompressed Cache                                         -->
+    <!-- ================================================================= -->
+    <mark_cache_size>536870912</mark_cache_size>
+    <uncompressed_cache_size>268435456</uncompressed_cache_size>
+
+    <remote_servers>
+        <clif_cluster>
+            <shard>
+                <internal_replication>true</internal_replication>
+                <replica>
+                    <host>clickhouse01</host>
+                    <port>9000</port>
+                </replica>
+                <replica>
+                    <host>clickhouse02</host>
+                    <port>9000</port>
+                </replica>
+            </shard>
+        </clif_cluster>
+    </remote_servers>
+
+    <zookeeper>
+        <node>
+            <host>clickhouse-keeper</host>
+            <port>2181</port>
+        </node>
+        <session_timeout_ms>30000</session_timeout_ms>
+        <operation_timeout_ms>10000</operation_timeout_ms>
+    </zookeeper>
+
+    <macros>
+        <shard>shard_01</shard>
+        <replica>replica_01</replica>
+    </macros>
+
+    <distributed_ddl>
+        <path>/clickhouse/task_queue/ddl</path>
+        <pool_size>4</pool_size>
+    </distributed_ddl>
+
+    <!-- Prometheus metrics endpoint -->
+    <prometheus>
+        <endpoint>/metrics</endpoint>
+        <port>9363</port>
+        <metrics>true</metrics>
+        <events>true</events>
+        <asynchronous_metrics>true</asynchronous_metrics>
+    </prometheus>
+</clickhouse>

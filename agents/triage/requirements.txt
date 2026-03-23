@@ -1,0 +1,21 @@
+# CLIF Triage Agent v7 — Python Dependencies
+# ==============================================
+
+# Core ML / Inference
+onnxruntime>=1.17,<2.0
+numpy>=1.24,<3.0
+
+# Log Template Mining
+drain3>=0.9.11
+
+# Kafka / Messaging
+confluent-kafka>=2.3
+
+# Web / Health Endpoint
+flask>=3.0
+
+# Serialization
+orjson>=3.9
+
+# Configuration parsing (drain3.ini)
+configparser>=6.0

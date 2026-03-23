@@ -1,0 +1,21 @@
+{
+  "iocs": [
+    {"type": "IPv4", "value": "185.220.101.34", "source": "MISP", "confidence": 92, "firstSeen": "2026-02-08T12:00:00Z", "lastSeen": "2026-02-11T08:00:00Z", "mitre": "T1071", "tags": ["c2", "tor-exit-node"], "matchedEvents": 0},
+    {"type": "IPv4", "value": "91.219.236.222", "source": "AlienVault OTX", "confidence": 87, "firstSeen": "2026-02-05T00:00:00Z", "lastSeen": "2026-02-10T16:00:00Z", "mitre": "T1190", "tags": ["scanner", "exploit-attempt"], "matchedEvents": 3},
+    {"type": "Domain", "value": "malware-c2.darkops.cc", "source": "Internal", "confidence": 99, "firstSeen": "2026-02-10T22:30:00Z", "lastSeen": "2026-02-11T09:00:00Z", "mitre": "T1071", "tags": ["c2", "dns-tunneling"], "matchedEvents": 234},
+    {"type": "SHA256", "value": "a7f1b8e3d4c5f6a7b8e3d4c5f6a7b8e3d4c5f6a7b8e3d4c5f6a7b8e3d4c5f6a7", "source": "VirusTotal", "confidence": 100, "firstSeen": "2026-02-09T16:20:00Z", "lastSeen": "2026-02-09T16:20:00Z", "mitre": "T1003", "tags": ["mimikatz", "credential-dumper"], "matchedEvents": 1},
+    {"type": "IPv4", "value": "45.155.205.233", "source": "MISP", "confidence": 78, "firstSeen": "2026-02-07T08:00:00Z", "lastSeen": "2026-02-11T01:00:00Z", "mitre": "T1566", "tags": ["phishing", "spearphishing"], "matchedEvents": 0},
+    {"type": "Domain", "value": "update-service.windowscheck.org", "source": "Internal", "confidence": 95, "firstSeen": "2026-02-11T06:45:00Z", "lastSeen": "2026-02-11T06:45:00Z", "mitre": "T1053", "tags": ["persistence", "fake-update"], "matchedEvents": 5},
+    {"type": "IPv4", "value": "103.224.80.5", "source": "AlienVault OTX", "confidence": 65, "firstSeen": "2026-02-01T00:00:00Z", "lastSeen": "2026-02-09T12:00:00Z", "mitre": "T1110", "tags": ["brute-force", "ssh"], "matchedEvents": 0},
+    {"type": "SHA256", "value": "c3d2e1f0a9b8c7d6e5f4a3b2c1d0e9f8a7b6c5d4e3f2a1b0c9d8e7f6a5b4c3d2", "source": "VirusTotal", "confidence": 88, "firstSeen": "2026-02-11T06:45:00Z", "lastSeen": "2026-02-11T06:45:00Z", "mitre": "T1053", "tags": ["trojan", "scheduled-task"], "matchedEvents": 5},
+    {"type": "URL", "value": "https://cdn.legit-update.com/patch.exe", "source": "MISP", "confidence": 91, "firstSeen": "2026-02-06T00:00:00Z", "lastSeen": "2026-02-10T18:00:00Z", "mitre": "T1566", "tags": ["malware-delivery", "social-engineering"], "matchedEvents": 0},
+    {"type": "IPv4", "value": "198.51.100.42", "source": "Internal", "confidence": 72, "firstSeen": "2026-02-10T04:00:00Z", "lastSeen": "2026-02-11T04:12:00Z", "mitre": "T1018", "tags": ["recon", "port-scan"], "matchedEvents": 3200}
+  ],
+  "threatPatterns": [
+    {"name": "Kerberoasting", "description": "Service ticket requests for offline cracking of service account passwords", "mitre": "T1558.003", "iocCount": 4, "matchedEvents": 0, "severity": 3},
+    {"name": "Pass-the-Hash", "description": "NTLM hash reuse for lateral movement without cracking credentials", "mitre": "T1550.002", "iocCount": 6, "matchedEvents": 12, "severity": 4},
+    {"name": "DNS Tunneling", "description": "Data exfiltration via encoded DNS queries to attacker-controlled domains", "mitre": "T1071.004", "iocCount": 3, "matchedEvents": 234, "severity": 4},
+    {"name": "Living Off the Land", "description": "Abuse of legitimate system binaries (LOLBins) for execution", "mitre": "T1218", "iocCount": 8, "matchedEvents": 7, "severity": 3},
+    {"name": "Golden Ticket", "description": "Forged Kerberos TGT granting unrestricted domain access", "mitre": "T1558.001", "iocCount": 2, "matchedEvents": 0, "severity": 4}
+  ]
+}

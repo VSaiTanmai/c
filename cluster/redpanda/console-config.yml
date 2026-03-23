@@ -1,0 +1,10 @@
+# Redpanda Console — Cluster Mode (connects to PC1 via LAN)
+# Mounted by docker-compose.pc2.yml
+# Hostnames (pc1-rp01, etc.) are resolved via extra_hosts in compose.
+kafka:
+  brokers:
+    - "pc1-rp01:17092"
+    - "pc1-rp02:29092"
+    - "pc1-rp03:39092"
+  schemaRegistry:
+    enabled: false

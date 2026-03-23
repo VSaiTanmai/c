@@ -1,0 +1,200 @@
+# =============================================================================
+# MinIO StatefulSet — 3-node erasure-coded S3-compatible object storage
+# =============================================================================
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: minio
+  namespace: clif
+  labels:
+    app.kubernetes.io/name: minio
+    app.kubernetes.io/component: object-storage
+    app.kubernetes.io/part-of: clif-siem
+    tier: data
+spec:
+  serviceName: minio-headless
+  replicas: 3
+  podManagementPolicy: Parallel
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: minio
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: minio
+        app.kubernetes.io/component: object-storage
+        tier: data
+    spec:
+      nodeSelector:
+        clif/tier: data
+      tolerations:
+        - key: clif/tier
+          operator: Equal
+          value: data
+          effect: NoSchedule
+      containers:
+        - name: minio
+          image: minio/minio:RELEASE.2024-08-29T01-40-52Z
+          command:
+            - /bin/sh
+            - -c
+            - |
+              minio server \
+                http://minio-{0...2}.minio-headless.clif.svc.cluster.local/data \
+                --console-address ":9001"
+          ports:
+            - name: api
+              containerPort: 9000
+              protocol: TCP
+            - name: console
+              containerPort: 9001
+              protocol: TCP
+          env:
+            - name: MINIO_ROOT_USER
+              valueFrom:
+                secretKeyRef:
+                  name: clif-credentials
+                  key: MINIO_ROOT_USER
+            - name: MINIO_ROOT_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: clif-credentials
+                  key: MINIO_ROOT_PASSWORD
+            - name: MINIO_PROMETHEUS_AUTH_TYPE
+              value: public
+          resources:
+            requests:
+              cpu: 250m
+              memory: 256Mi
+            limits:
+              cpu: "1"
+              memory: 1Gi
+          volumeMounts:
+            - name: data
+              mountPath: /data
+          readinessProbe:
+            exec:
+              command: ["mc", "ready", "local"]
+            periodSeconds: 10
+            timeoutSeconds: 5
+          livenessProbe:
+            httpGet:
+              path: /minio/health/live
+              port: api
+            initialDelaySeconds: 30
+            periodSeconds: 15
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+        labels:
+          app.kubernetes.io/name: minio
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        resources:
+          requests:
+            storage: 20Gi
+---
+# =============================================================================
+# LanceDB StatefulSet — Semantic Vector Search
+# =============================================================================
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: lancedb
+  namespace: clif
+  labels:
+    app.kubernetes.io/name: lancedb
+    app.kubernetes.io/component: vector-search
+    app.kubernetes.io/part-of: clif-siem
+    tier: compute
+spec:
+  serviceName: lancedb-headless
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: lancedb
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: lancedb
+        app.kubernetes.io/component: vector-search
+        tier: compute
+    spec:
+      nodeSelector:
+        clif/tier: compute
+      containers:
+        - name: lancedb
+          image: ghcr.io/clif-siem/lancedb:latest    # Built from lancedb-service/
+          env:
+            - name: LANCEDB_PATH
+              value: /data/lancedb
+            - name: EMBEDDING_MODEL
+              value: all-MiniLM-L6-v2
+            - name: EMBEDDING_BATCH_SIZE
+              value: "256"
+            - name: EMBEDDING_DIM
+              value: "384"
+            - name: CLICKHOUSE_HOST
+              value: clickhouse-headless.clif.svc.cluster.local
+            - name: CLICKHOUSE_PORT
+              value: "9000"
+            - name: CLICKHOUSE_USER
+              valueFrom:
+                secretKeyRef:
+                  name: clif-credentials
+                  key: CLICKHOUSE_USER
+            - name: CLICKHOUSE_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: clif-credentials
+                  key: CLICKHOUSE_PASSWORD
+            - name: CLICKHOUSE_DB
+              valueFrom:
+                secretKeyRef:
+                  name: clif-credentials
+                  key: CLICKHOUSE_DB
+            - name: SYNC_INTERVAL_SEC
+              value: "30"
+            - name: SYNC_BATCH_SIZE
+              value: "1000"
+            - name: API_HOST
+              value: 0.0.0.0
+            - name: API_PORT
+              value: "8100"
+            - name: LOG_LEVEL
+              value: INFO
+            - name: CORS_ORIGINS
+              value: "http://localhost:3001"
+          ports:
+            - name: http
+              containerPort: 8100
+          resources:
+            requests:
+              cpu: 500m
+              memory: 1Gi
+            limits:
+              cpu: "2"
+              memory: 3Gi
+          volumeMounts:
+            - name: data
+              mountPath: /data/lancedb
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: http
+            periodSeconds: 30
+            timeoutSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: http
+            initialDelaySeconds: 60
+            periodSeconds: 30
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        resources:
+          requests:
+            storage: 10Gi

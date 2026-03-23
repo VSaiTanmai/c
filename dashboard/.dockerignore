@@ -1,0 +1,8 @@
+node_modules
+.next
+.git
+*.md
+*.bak
+api_backup
+lib_backup
+hooks_backup

@@ -1,0 +1,23 @@
+title: Initial Access – Exploit Public-Facing Application (T1190)
+id: clif-initial-access-001
+status: production
+severity: critical
+category: ids_ips
+description: >
+  IDS/IPS events indicating exploitation of public-facing services,
+  confirmed by the triage model as initial-access.  Covers T1190
+  and T1078 (Valid Accounts used for initial access).
+tags:
+  - attack.t1190
+  - attack.t1078
+  - attack.initial_access
+detection:
+  condition: and
+  keywords:
+    - "initial-access"
+  clickhouse: |
+    SELECT count() > 0
+    FROM {database}.security_events
+    WHERE hostname = '{hostname}'
+      AND mitre_tactic = 'initial-access'
+      AND timestamp >= now() - INTERVAL {window_minutes} MINUTE

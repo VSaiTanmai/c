@@ -1,0 +1,96 @@
+# =============================================================================
+# Consumer Deployment — Redpanda → ClickHouse ingest pipeline
+# =============================================================================
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: consumer
+  namespace: clif
+  labels:
+    app.kubernetes.io/name: consumer
+    app.kubernetes.io/component: ingest-pipeline
+    app.kubernetes.io/part-of: clif-siem
+    tier: compute
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: consumer
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 1
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: consumer
+        app.kubernetes.io/component: ingest-pipeline
+        tier: compute
+    spec:
+      nodeSelector:
+        clif/tier: compute
+      containers:
+        - name: consumer
+          image: ghcr.io/clif-siem/consumer:latest    # Built from consumer/
+          env:
+            - name: KAFKA_BROKERS
+              value: "redpanda-0.redpanda-headless.clif.svc.cluster.local:9092,redpanda-1.redpanda-headless.clif.svc.cluster.local:9092,redpanda-2.redpanda-headless.clif.svc.cluster.local:9092"
+            - name: CLICKHOUSE_HOST
+              value: clickhouse-0.clickhouse-headless.clif.svc.cluster.local
+            - name: CLICKHOUSE_ALT_HOSTS
+              value: clickhouse-1.clickhouse-headless.clif.svc.cluster.local:9000
+            - name: CLICKHOUSE_PORT
+              value: "9000"
+            - name: CLICKHOUSE_USER
+              valueFrom:
+                secretKeyRef:
+                  name: clif-credentials
+                  key: CLICKHOUSE_USER
+            - name: CLICKHOUSE_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: clif-credentials
+                  key: CLICKHOUSE_PASSWORD
+            - name: CLICKHOUSE_DB
+              valueFrom:
+                secretKeyRef:
+                  name: clif-credentials
+                  key: CLICKHOUSE_DB
+            - name: CONSUMER_GROUP_ID
+              value: clif-clickhouse-consumer
+            - name: CONSUMER_BATCH_SIZE
+              value: "500000"
+            - name: CONSUMER_FLUSH_INTERVAL_SEC
+              value: "0.3"
+            - name: CONSUMER_MAX_RETRIES
+              value: "5"
+            - name: CONSUMER_POLL_BATCH
+              value: "50000"
+            - name: CONSUMER_FLUSH_WORKERS
+              value: "6"
+            - name: LOG_LEVEL
+              value: INFO
+          resources:
+            requests:
+              cpu: 500m
+              memory: 256Mi
+            limits:
+              cpu: "2"
+              memory: 1Gi
+          readinessProbe:
+            exec:
+              command:
+                - python
+                - -c
+                - "import socket; s=socket.socket(); s.settimeout(2); s.connect(('clickhouse-headless.clif.svc.cluster.local',9000)); s.close()"
+            periodSeconds: 30
+            timeoutSeconds: 10
+          livenessProbe:
+            exec:
+              command:
+                - python
+                - -c
+                - "import socket; s=socket.socket(); s.settimeout(2); s.connect(('clickhouse-headless.clif.svc.cluster.local',9000)); s.close()"
+            initialDelaySeconds: 30
+            periodSeconds: 30

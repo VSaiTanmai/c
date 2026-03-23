@@ -1,0 +1,7 @@
+kafka:
+  brokers:
+    - redpanda01:9092
+    - redpanda02:9092
+    - redpanda03:9092
+  schemaRegistry:
+    enabled: false

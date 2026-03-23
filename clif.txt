@@ -1,0 +1,607 @@
+================================================================================
+CLIF — Comprehensive Project Context for AI Agents
+================================================================================
+Last updated: 2026-03-13
+
+================================================================================
+SECTION 1: PROJECT OVERVIEW
+================================================================================
+
+CLIF (CLIF Log Investigation Framework) is an enterprise SIEM (Security
+Information and Event Management) pipeline that ingests real system/network
+logs, classifies them with VRL transforms, scores them with ML ensemble
+models, hunts for threats with AI agents, verifies findings cryptographically,
+and presents everything through a Next.js dashboard.
+
+The system runs across TWO physical Windows PCs on the same LAN.
+All infrastructure is Docker-containerized (25 containers total).
+
+Previous sessions accomplished:
+- IP migration from dev network (10.55.88.x) to production LAN (10.14.17.x)
+- Full end-to-end pipeline test: 82,712 events ingested successfully
+- VRL bottleneck optimization (Kafka when_full: block → drop_newest)
+- Dashboard data feasibility audit: all 7 pages mapped to real data sources
+- Comprehensive gap analysis documented in DASHBOARD_DATA_AUDIT.md
+
+
+================================================================================
+SECTION 2: TWO-MACHINE ARCHITECTURE
+================================================================================
+
+┌───────────────────────────────────────────────────────────────────────┐
+│ PC1 — DATA TIER (10.14.17.221)                                      │
+│ Hardware: i5-13420H, 8C/12T, 16 GB RAM                              │
+│ Path: C:\CLIF                                                       │
+│ Containers (12):                                                     │
+│   • Vector (log ingestion + VRL transform)                           │
+│   • Redpanda ×3 (Kafka-compatible message broker, 3-node cluster)    │
+│   • ClickHouse ×2 (clif-clickhouse01, clif-clickhouse02)            │
+│   • ClickHouse Keeper (consensus)                                    │
+│   • Go Consumer ×2 (Kafka → ClickHouse writer)                      │
+│   • MinIO ×3 (S3-compatible object storage for evidence archives)    │
+│                                                                      │
+│ KEY: Entire ingestion path runs locally (zero cross-machine hops)    │
+│ Compose: docker-compose.pc1.yml --env-file .env                     │
+└───────────────────────────────────────────────────────────────────────┘
+         │
+    LAN (10.14.17.0/24) — Agents on PC2 reach Redpanda+ClickHouse via DATA_IP
+         │
+┌───────────────────────────────────────────────────────────────────────┐
+│ PC2 — COMPUTE TIER (10.14.17.71)                                     │
+│ Hardware: similar specs to PC1                                        │
+│ Path: C:\Users\saita\OneDrive\Desktop\CLIF-PC2\clif-log-investigation│
+│ SSH: ssh saita@10.14.17.71 (key-based, no password)                  │
+│ Containers (13):                                                     │
+│   • Triage Agent ×4 (ML ensemble scoring, consumer group)            │
+│   • Hunter Agent (threat hunting + LanceDB search)                   │
+│   • Verifier Agent (verdict + Merkle integrity)                      │
+│   • XAI Service (SHAP explanations)                                  │
+│   • Merkle Service (evidence hash anchoring)                         │
+│   • LanceDB (semantic vector search)                                 │
+│   • Redpanda Console (web UI for Kafka topics)                       │
+│   • Prometheus (metrics collection)                                  │
+│   • Grafana (monitoring dashboards)                                  │
+│                                                                      │
+│ KEY: Pure ML inference tier — all compute, no storage                │
+│ Compose: docker-compose.pc2.yml --env-file .env --env-file cluster\.env│
+└───────────────────────────────────────────────────────────────────────┘
+
+Network Config:
+  DATA_IP=10.14.17.221 (set in cluster.env on both PCs)
+  PC2 containers resolve ClickHouse/Redpanda hostnames via extra_hosts → DATA_IP
+
+
+================================================================================
+SECTION 3: DATA PIPELINE FLOW
+================================================================================
+
+Real Logs
+  │
+  ▼
+Vector (VRL parse/classify, port 1514 syslog, 8687 HTTP)
+  │  Single mega_transform: pre-classification fast path, 512-byte prefix
+  │  regex (~9 ops/event), branches into 4 event types
+  ▼
+Redpanda (11 topics, 12 partitions each)
+  │  Topics: raw-logs, security-events, process-events, network-events,
+  │          triage-scores, anomaly-alerts, hunter-tasks, hunter-results,
+  │          verifier-results, dead-letter, templated-logs
+  │          (+ verifier-tasks with 6 partitions)
+  ▼
+Go Consumer ×2 (Kafka → ClickHouse batch writer)
+  │  Batch: 200K events or 2s flush, LZ4 compression
+  │  UUID5 deterministic event_id from topic:partition:offset
+  ▼
+ClickHouse (12 base tables + 14 materialized views)
+  │
+  ├──▶ Triage Agent ×4 (consume raw-logs, security/process/network-events)
+  │      LightGBM + EIF + ARF ensemble, SHAP explainer, Drain3 templates
+  │      Combined = lgbm×0.80 + eif×0.12 + arf×0.08
+  │      Action: discard (<0.39) / monitor (0.39-0.89) / escalate (≥0.89)
+  │      Escalated events → hunter-tasks + anomaly-alerts topics
+  │      Output → triage_scores table
+  │
+  ├──▶ Hunter Agent (consume hunter-tasks)
+  │      Secondary score gate: adjusted ≥ 0.70
+  │      L1 parallel: Sigma rules, SPC, Graph, Temporal, LanceDB similarity
+  │      L2 parallel: MITRE mapping, Campaign detection
+  │      ML scoring: CatBoost or heuristic
+  │      Output → hunter_investigations table + hunter-results topic
+  │
+  ├──▶ Verifier Agent (consume verifier-tasks)
+  │      Verdict: true_positive / false_positive / inconclusive
+  │      Evidence verification via Merkle tree integrity
+  │      Priority: P1-P4, generates analyst_summary + report_narrative
+  │      Output → verifier_results table
+  │
+  └──▶ Merkle Service (periodic daemon, every 30s, 1800s batch window)
+         SHA256 hash chains over event batches per source table
+         Stores merkle_root, leaf_hashes, s3_key → evidence_anchors table
+         Archives to MinIO S3 (clif-evidence-archive bucket)
+
+
+================================================================================
+SECTION 4: CLICKHOUSE SCHEMA (Database: clif_logs)
+================================================================================
+
+26 total objects (12 base tables + 14 materialized views)
+
+─── BASE TABLES ───
+
+raw_logs (12 cols):
+  event_id UUID, timestamp DateTime64, received_at DateTime64,
+  level String, source String, message String, metadata Map(String,String),
+  user_id String, ip_address IPv4, request_id String,
+  anchor_tx_id String, anchor_batch_hash String
+
+security_events (16 cols):
+  event_id UUID, timestamp DateTime64, severity UInt8 (0=Info..4=Critical),
+  category String, source String, description String,
+  user_id String, ip_address IPv4, hostname String,
+  mitre_tactic String, mitre_technique String,
+  ai_confidence Float32, ai_explanation String,
+  raw_log_event_id UUID, anchor_tx_id String, metadata Map(String,String)
+
+process_events (19 cols):
+  event_id UUID, timestamp DateTime64, hostname String,
+  pid UInt32, ppid UInt32, uid UInt32, gid UInt32,
+  binary_path String, arguments String, cwd String, exit_code Int32,
+  container_id String, pod_name String, namespace String,
+  syscall String, is_suspicious UInt8, detection_rule String,
+  anchor_tx_id String, metadata Map(String,String)
+
+network_events (23 cols):
+  event_id UUID, timestamp DateTime64, hostname String,
+  src_ip IPv4, dst_ip IPv4, src_port UInt16, dst_port UInt16,
+  protocol String, direction String, bytes_sent UInt64, bytes_received UInt64,
+  duration_ms UInt32, pid UInt32, binary_path String,
+  container_id String, pod_name String, namespace String,
+  dns_query String, geo_country String,
+  is_suspicious UInt8, detection_rule String,
+  anchor_tx_id String, metadata Map(String,String)
+
+triage_scores (29 cols):
+  score_id UUID, event_id UUID, timestamp DateTime64,
+  source_type String, hostname String, source_ip String, user_id String,
+  template_id String, template_rarity Float32,
+  combined_score/lgbm_score/eif_score/arf_score Float32,
+  score_std_dev Float32, agreement Float32, ci_lower/ci_upper Float32,
+  asset_multiplier Float32, adjusted_score Float32,
+  action Enum8('discard','monitor','escalate'),
+  ioc_match UInt8, ioc_confidence Float32,
+  mitre_tactic String, mitre_technique String,
+  shap_top_features String, shap_summary String,
+  features_stale UInt8, model_version String, disagreement_flag UInt8
+
+hunter_investigations (18 cols):
+  investigation_id UUID, alert_id UUID,
+  started_at/completed_at DateTime64,
+  status Enum8('pending','running','completed','failed','timeout'),
+  hostname String, source_ip String, user_id String, trigger_score Float32,
+  severity Enum8('info','low','medium','high','critical'),
+  finding_type String, summary String, evidence_json String,
+  correlated_events Array(UUID),
+  mitre_tactics Array(String), mitre_techniques Array(String),
+  recommended_action String, confidence Float32
+
+verifier_results (17 cols):
+  verification_id UUID, investigation_id UUID, alert_id UUID,
+  started_at/completed_at DateTime64,
+  status Enum8('pending','running','completed','failed','timeout','skipped'),
+  verdict Enum8('true_positive','false_positive','inconclusive'),
+  confidence Float32, evidence_verified UInt8,
+  merkle_batch_ids Array(String),
+  timeline_json String, ioc_correlations String,
+  priority Enum8('P1','P2','P3','P4'),
+  recommended_action String, analyst_summary String,
+  report_narrative String, evidence_json String
+
+evidence_anchors (13 cols):
+  batch_id UUID, table_name String, time_from/time_to DateTime64,
+  event_count UInt64, merkle_root String, merkle_depth UInt32,
+  leaf_hashes Array(String), s3_key String, s3_version_id String,
+  status String, prev_merkle_root String, created_at DateTime64
+
+ioc_cache (9 cols):
+  ioc_type Enum8('ip','domain','hash','url','email'),
+  ioc_value String, source String, confidence UInt8,
+  threat_type String, first_seen/last_seen/expires_at DateTime64,
+  metadata Map(String,String)
+
+feedback_labels (12 cols):
+  feedback_id UUID, event_id UUID, score_id Nullable(UUID),
+  timestamp DateTime64,
+  label Enum8('true_positive','false_positive','unknown'),
+  confidence Enum8('low','medium','high'),
+  analyst_id String, notes String,
+  original_combined/original_lgbm/original_eif/original_arf Float32
+
+allowlist (7 cols):
+  entry_type Enum8('ip','user','host','template','source'),
+  entry_value String, reason String, added_by String,
+  created_at DateTime64, expires_at Nullable(DateTime64), active UInt8
+
+source_thresholds (5 cols):
+  source_type String, suspicious_threshold Float32 (default 0.7),
+  anomalous_threshold Float32 (default 0.9),
+  baseline_window_days UInt32 (default 7), last_recalculated DateTime64
+
+─── MATERIALIZED VIEWS ───
+
+events_per_minute:  minute DateTime, source String, level String, event_count UInt64
+events_per_10s:     ts DateTime, source String, event_count UInt64
+security_severity_hourly:  hour DateTime, category String, severity UInt8, event_count UInt64
+pipeline_metrics:   ts DateTime, metric String, value Float64
+(+ corresponding _mv trigger tables + dead_letter_events)
+
+
+================================================================================
+SECTION 5: AGENT SERVICES (all on PC2)
+================================================================================
+
+TRIAGE AGENT (Flask, ports 8300-8303, 4 replicas in consumer group)
+  Input topics: raw-logs, security-events, process-events, network-events
+  Output: triage-scores (all), anomaly-alerts + hunter-tasks (escalated)
+  Models: LightGBM (0.80 weight) + Extended Isolation Forest (0.12) +
+          Adaptive Random Forest (0.08)
+  Features: Drain3 template mining, template_rarity, IOC matching
+  Thresholds: suspicious ≥0.39, anomalous ≥0.89 (escalate)
+  Batch: 500 msgs or 500ms, polling every 100ms
+  Key endpoints: GET /health, GET /stats, GET /model/info
+  Config file: agents/triage/config.py
+  Logic: agents/triage/score_fusion.py (fusion + routing)
+  App: agents/triage/app.py
+
+HUNTER AGENT (FastAPI, port 8400, 1 replica)
+  Input: hunter-tasks topic
+  Output: hunter-results topic → hunter_investigations table
+  Secondary gate: adjusted_score ≥ 0.70
+  L1 parallel (5 tasks): Sigma rules, SPC engine, Graph builder,
+                          Temporal correlator, LanceDB similarity
+  L2 parallel: MITRE mapper, Campaign detector
+  ML: CatBoost auto-switch or heuristic scoring
+  Key endpoints: GET /health, GET /stats
+  Config: agents/hunter/config.py
+  Investigation modules: agents/hunter/investigation/
+    campaign_detector.py, graph_builder.py, mitre_mapper.py,
+    similarity_searcher.py, spc_engine.py, temporal_correlator.py
+
+VERIFIER AGENT (FastAPI, port 8500, 1 replica)
+  Input: verifier-tasks topic (from hunter)
+  Output: verifier_results table
+  Verdict: true_positive / false_positive / inconclusive
+  Merkle integrity verification, timeline reconstruction
+  Generates: analyst_summary, report_narrative, priority (P1-P4)
+  Key endpoints: GET /health
+
+XAI SERVICE (FastAPI, port 8200, 1 replica)
+  SHAP explanations for individual events
+  Key endpoints: GET /xai/status, GET /model/features,
+                 POST /explain (event_id → SHAP values)
+  App: agents/xai-service/app.py
+
+MERKLE SERVICE (port 8600, daemon mode)
+  Periodic: every 30s (MERKLE_DAEMON_INTERVAL)
+  Batch window: 1800s (MERKLE_BATCH_WINDOW)
+  SHA256 hash chains, stores to evidence_anchors + MinIO S3
+
+LANCEDB SERVICE (port 8100)
+  Semantic vector search with all-MiniLM-L6-v2 embeddings
+  Syncs from ClickHouse every 30s, batch of 1000 events
+  Used by Hunter similarity_searcher for event correlation
+
+
+================================================================================
+SECTION 6: DASHBOARD (Next.js)
+================================================================================
+
+Location: C:\CLIF\dashboard\
+Dev server: npx next dev -p 3001
+Framework: Next.js (App Router), TypeScript
+UI libraries: Tailwind CSS, shadcn/ui, recharts (charts), @xyflow/react (graphs)
+Types: dashboard/src/lib/types.ts
+
+─── PAGES ───
+/dashboard        Main overview (KPIs, charts, alerts, MITRE heatmap)
+/explainability   SHAP explanations, model performance, feature importance
+/threat-intel     MITRE ATT&CK stats, IOC indicators, attack timeline
+/investigations   Investigation list + detail view (5-table JOIN)
+/ai-agents        Live agent health, leaderboard, recent investigations
+/chain-of-custody Evidence anchor batches, Merkle verification
+/reports          Report generation (CSV/JSON/Markdown), aggregated stats
+/search           Full-text log search
+/chat             AI chat interface
+/live-feed        Real-time event stream
+/evidence         Evidence browser
+/attack-graph     Visual attack graph (@xyflow/react)
+/settings         Configuration
+/system           System health (Prometheus + CH + Redpanda status)
+/alerts           Alert management
+
+─── KEY API ROUTES ───
+/api/metrics            Main dashboard — 17 parallel CH queries
+/api/threat-intel       MITRE stats, IOC indicators, attack timeline
+/api/investigations/[id] Full investigation detail (5-table JOIN:
+                         hunter + verifier + security + raw + triage + evidence)
+/api/evidence/chain     Evidence anchor batches + summary stats
+/api/evidence/verify    Cryptographic Merkle re-verification (SHA256 rebuild)
+/api/reports            Aggregated report data (alerts, events, evidence, MITRE)
+/api/reports/download   Report generation in CSV/JSON/Markdown formats
+/api/ai/agents          Live agent health probes (HTTP to :8300/:8400/:8500/:8200)
+/api/ai/xai             XAI status + SHAP explain proxy
+/api/ai/investigate     SHAP explanation via XAI service proxy
+/api/ai/leaderboard     Model leaderboard from XAI metrics table
+/api/system             System health from Prometheus + CH + Redpanda
+
+
+================================================================================
+SECTION 7: KAFKA (REDPANDA) TOPICS
+================================================================================
+
+All topics have 12 partitions, replication factor 1 (single-broker logical).
+Redpanda is Kafka-compatible (same protocol, no JVM).
+
+raw-logs             Raw ingested log events
+security-events      Classified security events (severity, MITRE tags)
+process-events       Process/syscall events
+network-events       Network flow events
+triage-scores        Triage agent output (all scored events)
+anomaly-alerts       Escalated events (adjusted_score ≥ 0.89)
+hunter-tasks         Events sent to Hunter for investigation
+hunter-results       Hunter agent investigation results
+verifier-results     Verifier agent verdict results
+verifier-tasks       Tasks for Verifier (6 partitions)
+dead-letter          Failed/unparseable events
+templated-logs       Drain3 template-processed logs
+
+
+================================================================================
+SECTION 8: CREDENTIALS & PORTS
+================================================================================
+
+ClickHouse:
+  User: clif_admin
+  Password: Cl1f_Ch@ngeM3_2026!
+  Database: clif_logs
+  HTTP port: 8123
+  Native port: 9000
+
+Redpanda:
+  Kafka port: 9092
+  Admin port: 9644
+  Schema port: 8081
+  Console: (PC2, web UI)
+
+MinIO:
+  User: clif_minio_admin
+  Password: Cl1f_M1n10_2026!
+  Endpoint: http://minio1:9000
+  Console port: 9003
+  Buckets: clif-cold-logs, clif-backups, clif-evidence-archive
+
+Grafana:
+  Port: 3002
+  User: admin
+  Password: Cl1f_Gr@f_2026!
+
+Prometheus: port 9090
+Dashboard: port 3001
+
+Agent ports (all on PC2):
+  Triage:   8300-8303 (4 replicas)
+  XAI:      8200
+  Hunter:   8400
+  Verifier: 8500
+  Merkle:   8600
+  LanceDB:  8100
+
+Vector ports (PC1):
+  Syslog:  1514
+  HTTP:    8687
+  API:     8686
+  StatsD:  8125
+  Prom:    9598
+
+
+================================================================================
+SECTION 9: KEY FILE LOCATIONS
+================================================================================
+
+Project Root: C:\CLIF\
+
+Config & Compose:
+  .env                          Master environment variables
+  docker-compose.pc1.yml        PC1 data tier (12 containers)
+  docker-compose.pc2.yml        PC2 compute tier (13 containers)
+  docker-compose.mac.yml        Single-machine dev compose
+
+Pipeline:
+  vector/vector.yaml            VRL transform config (mega_transform)
+  consumer-go/                  Go consumer (Kafka → ClickHouse)
+  consumer/app.py               Python consumer (legacy, Go preferred)
+  clickhouse/                   ClickHouse config, schema init
+
+Agents:
+  agents/triage/app.py          Triage agent main (Flask)
+  agents/triage/config.py       Triage configuration & thresholds
+  agents/triage/score_fusion.py Score fusion + routing logic
+  agents/hunter/app.py          Hunter agent main (FastAPI)
+  agents/hunter/config.py       Hunter configuration
+  agents/hunter/investigation/  L1/L2 investigation modules
+  agents/verifier/              Verifier agent
+  agents/xai-service/app.py     XAI service (SHAP)
+  agents/Data/                  Training data, models
+
+Dashboard:
+  dashboard/src/app/api/        All API routes (Next.js)
+  dashboard/src/app/            Pages (app router)
+  dashboard/src/lib/types.ts    TypeScript interfaces
+  dashboard/src/lib/clickhouse.ts ClickHouse client + circuit breaker
+  dashboard/src/lib/cache.ts    Stale-while-error cache
+
+Monitoring:
+  monitoring/                   Prometheus config, Grafana dashboards
+  lancedb-service/              LanceDB vector search service
+  merkle-service/               Merkle anchoring service
+
+Testing & Tools:
+  tools/tcpblaster/main.go      Go TCP blaster (benchmarking, 44.8K EPS)
+  benchmark_v2.py               Python benchmark
+  tests/                        Test suite
+  scripts/                      Utility scripts
+
+Documentation:
+  DASHBOARD_DATA_AUDIT.md       7-page data feasibility audit (with gaps)
+  CONNECTING_PC2_WINDOWS.md     PC2 setup instructions
+  PIPELINE_VALIDATION_REPORT.md Pipeline test results (82,712 events)
+  RUNNING_THE_PIPELINE.md       Operational guide
+  README.md                     Project overview
+
+
+================================================================================
+SECTION 10: STARTUP COMMANDS
+================================================================================
+
+PC1 (Data Tier):
+  docker compose -f docker-compose.pc1.yml --env-file .env up -d
+
+PC2 (Compute Tier, from PC2 path):
+  docker compose -f docker-compose.pc2.yml --env-file .env --env-file cluster\.env up -d
+
+PC2 with LanceDB:
+  docker compose -f docker-compose.pc2.yml --env-file .env --env-file cluster\.env --profile full up -d
+
+Dashboard dev server:
+  cd dashboard && npx next dev -p 3001
+
+Check ClickHouse:
+  Invoke-WebRequest -Uri "http://localhost:8123/ping" -UseBasicParsing
+  docker exec clif-clickhouse01 clickhouse-client --user clif_admin --password "Cl1f_Ch@ngeM3_2026!" --query "SELECT count() FROM clif_logs.raw_logs"
+
+Check Kafka topics:
+  docker exec clif-redpanda01 rpk topic list
+
+Check agent health:
+  curl http://10.14.17.71:8300/health  (Triage)
+  curl http://10.14.17.71:8400/health  (Hunter)
+  curl http://10.14.17.71:8500/health  (Verifier)
+  curl http://10.14.17.71:8200/xai/status (XAI)
+
+
+================================================================================
+SECTION 11: DASHBOARD DATA COVERAGE (from audit)
+================================================================================
+
+Page                   Coverage   Gaps
+─────────────────────────────────────────────
+Dashboard (Main)        100%      0
+Threat Intelligence     100%      0
+Investigation Detail    100%      0
+Chain of Custody        100%      0
+AI Agents                95%      1 (multi-model leaderboard)
+Explainability           80%      6 (PSI drift, model freshness, radar,
+                                     feature interactions, decision boundary,
+                                     fairness metrics)
+Reports                  85%      5 (report history, sigma catalog,
+                                     KL divergence, per-feature PSI,
+                                     model health)
+
+Total: 12 gaps identified. All have real-data implementation plans
+documented in DASHBOARD_DATA_AUDIT.md (no mock data needed).
+
+
+================================================================================
+SECTION 12: KNOWN ISSUES & QUICK FIXES
+================================================================================
+
+1. DUAL PROCESS PORT 8200: Docker clif-ai-classifier binds 8200, conflicts
+   with uvicorn XAI service. Fix: docker stop clif-ai-classifier after
+   every docker compose up.
+
+2. DOCKER PIPE NOT FOUND: Docker Desktop engine pipes not initialized.
+   Fix: Restart Docker Desktop, wait 45s for pipes.
+
+3. DASHBOARD ALL ZEROS: ClickHouse down or circuit breaker tripped.
+   Fix: Check CH ping (localhost:8123), restart Docker if needed.
+   Circuit breaker: dashboard/src/lib/clickhouse.ts (10s cooldown, threshold 3)
+   Stale cache: dashboard/src/lib/cache.ts preserves last good data.
+
+4. XAI SHAP ERROR: "only length-1 arrays" — SHAP >=0.50 API change.
+   Fixed in ai-agents/inference/explainer.py (ndim==3 check).
+
+5. AI SERVICE START: Kill all uvicorn → docker stop clif-ai-classifier →
+   cd ai-agents && python -m uvicorn ai_service:app --host 0.0.0.0 --port 8200
+
+6. NEXT.JS DEV: Must use `next dev` not `next start` for live changes.
+   Port 3001. Clear .next cache if stale.
+
+
+================================================================================
+SECTION 13: PERFORMANCE BENCHMARKS
+================================================================================
+
+Go TCP blaster: 44.8K-55.4K EPS (vs Python 36K EPS, +25-54%)
+Synthetic events: 120K EPS (simple templates)
+Real logs with VRL: 51-62K EPS
+Key bottleneck: ClickHouse write (186-223% CPU)
+VRL overhead: ~50% throughput cost
+Kafka when_full: block was #1 bottleneck (fixed to drop_newest: 40K→45K EPS)
+Pipeline test: 82,712 real events ingested end-to-end successfully
+
+
+────────────────────────────────────────────────────────────────────────────────
+8. NAVIGATION: TOPBAR vs SIDEBAR
+────────────────────────────────────────────────────────────────────────────────
+SYMPTOM:  Added nav items to sidebar.tsx but they don't appear.
+
+ROOT CAUSE: The layout (dashboard/src/app/layout.tsx) imports TopBar, NOT Sidebar.
+            sidebar.tsx exists but is NOT used.
+
+FIX:  Edit dashboard/src/components/top-bar.tsx → NAV_SECTIONS array.
+      NOT sidebar.tsx.
+
+
+────────────────────────────────────────────────────────────────────────────────
+9. FULL SYSTEM STARTUP CHECKLIST
+────────────────────────────────────────────────────────────────────────────────
+Order matters:
+
+  1. Start Docker Desktop → wait for green whale icon (pipes ready)
+  2. docker compose up -d
+  3. docker stop clif-ai-classifier    ← CRITICAL: frees port 8200
+  4. Verify ClickHouse: curl http://localhost:8123/ping → "Ok."
+  5. Start AI service (see issue #6)
+  6. Verify: curl http://localhost:8200/health → healthy
+  7. Start Next.js dev server (see issue #7)
+  8. Verify: curl http://localhost:3001 → 200
+
+Services & Ports:
+  - ClickHouse:     8123 (HTTP), 9000 (native)
+  - Redpanda:       9092 (Kafka), 9644 (admin)
+  - MinIO:          9000/9002
+  - Prometheus:     9090
+  - Grafana:        3002
+  - AI Service:     8200 (local uvicorn, NOT Docker container)
+  - Dashboard:      3001 (Next.js dev)
+  - Ollama:         11434 (LLM - qwen3-vl:4b, qwen3:4b)
+  - LanceDB:        8100 (DO NOT START - not needed for current setup)
+
+
+────────────────────────────────────────────────────────────────────────────────
+10. CLICKHOUSE CREDENTIALS
+────────────────────────────────────────────────────────────────────────────────
+File: C:\CLIF\.env
+  CLICKHOUSE_USER=clif_admin
+  CLICKHOUSE_PASSWORD=Cl1f_Ch@ngeM3_2026!
+
+File: C:\CLIF\dashboard\.env.local
+  CH_USER=clif_admin
+  CH_PASSWORD=Cl1f_Ch@ngeM3_2026!
+
+HTTP auth uses X-ClickHouse-User / X-ClickHouse-Key headers.
+Query param auth: ?user=clif_admin&password=Cl1f_Ch@ngeM3_2026!
+
+Docker exec auth:
+  docker exec clif-clickhouse01 clickhouse-client --user clif_admin --password "Cl1f_Ch@ngeM3_2026!" --query "SELECT 1"
+
+================================================================================

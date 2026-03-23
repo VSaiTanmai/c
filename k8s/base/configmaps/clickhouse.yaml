@@ -1,0 +1,345 @@
+# =============================================================================
+# ClickHouse ConfigMaps — All ClickHouse configuration files
+# =============================================================================
+# K8s equivalent of Docker Compose bind-mounted config files.
+# Adapted hostnames for K8s headless service DNS.
+# =============================================================================
+
+# ── Keeper Config ─────────────────────────────────────────────────────────────
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: clickhouse-keeper-config
+  namespace: clif
+  labels:
+    app.kubernetes.io/name: clickhouse-keeper
+    app.kubernetes.io/part-of: clif-siem
+data:
+  keeper_config.xml: |
+    <clickhouse>
+        <logger>
+            <level>warning</level>
+            <console>true</console>
+        </logger>
+        <listen_host>0.0.0.0</listen_host>
+        <keeper_server>
+            <tcp_port>2181</tcp_port>
+            <server_id>1</server_id>
+            <log_storage_path>/var/lib/clickhouse-keeper/log</log_storage_path>
+            <snapshot_storage_path>/var/lib/clickhouse-keeper/snapshots</snapshot_storage_path>
+            <coordination_settings>
+                <operation_timeout_ms>10000</operation_timeout_ms>
+                <session_timeout_ms>30000</session_timeout_ms>
+                <raft_logs_level>warning</raft_logs_level>
+                <force_sync>true</force_sync>
+                <auto_forwarding>true</auto_forwarding>
+                <shutdown_timeout>5000</shutdown_timeout>
+                <snapshot_distance>100000</snapshot_distance>
+                <snapshots_to_keep>5</snapshots_to_keep>
+                <reserved_log_items>200000</reserved_log_items>
+                <max_requests_batch_size>100</max_requests_batch_size>
+            </coordination_settings>
+            <raft_configuration>
+                <server>
+                    <id>1</id>
+                    <hostname>clickhouse-keeper-0.clickhouse-keeper-headless.clif.svc.cluster.local</hostname>
+                    <port>9234</port>
+                </server>
+            </raft_configuration>
+        </keeper_server>
+    </clickhouse>
+---
+# ── Node 01 Cluster Config ───────────────────────────────────────────────────
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: clickhouse-node01-config
+  namespace: clif
+  labels:
+    app.kubernetes.io/name: clickhouse
+    app.kubernetes.io/part-of: clif-siem
+data:
+  clusters.xml: |
+    <clickhouse>
+        <listen_host>0.0.0.0</listen_host>
+        <interserver_http_port>9009</interserver_http_port>
+        <max_concurrent_queries>200</max_concurrent_queries>
+        <max_server_memory_usage_to_ram_ratio>0.8</max_server_memory_usage_to_ram_ratio>
+        <max_table_size_to_drop>0</max_table_size_to_drop>
+        <max_partition_size_to_drop>0</max_partition_size_to_drop>
+        <query_log>
+            <database>system</database>
+            <table>query_log</table>
+            <partition_by>toYYYYMM(event_date)</partition_by>
+            <flush_interval_milliseconds>7500</flush_interval_milliseconds>
+        </query_log>
+        <part_log>
+            <database>system</database>
+            <table>part_log</table>
+            <partition_by>toYYYYMM(event_date)</partition_by>
+            <flush_interval_milliseconds>7500</flush_interval_milliseconds>
+        </part_log>
+        <metric_log>
+            <database>system</database>
+            <table>metric_log</table>
+            <collect_interval_milliseconds>1000</collect_interval_milliseconds>
+        </metric_log>
+        <merge_tree>
+            <parts_to_delay_insert>300</parts_to_delay_insert>
+            <parts_to_throw_insert>600</parts_to_throw_insert>
+            <max_bytes_to_merge_at_max_space_in_pool>161061273600</max_bytes_to_merge_at_max_space_in_pool>
+            <number_of_free_entries_in_pool_to_execute_mutation>20</number_of_free_entries_in_pool_to_execute_mutation>
+            <max_suspicious_broken_parts>100</max_suspicious_broken_parts>
+        </merge_tree>
+        <background_pool_size>16</background_pool_size>
+        <background_move_pool_size>8</background_move_pool_size>
+        <background_merges_mutations_concurrency_ratio>2</background_merges_mutations_concurrency_ratio>
+        <background_schedule_pool_size>16</background_schedule_pool_size>
+        <background_fetches_pool_size>8</background_fetches_pool_size>
+        <background_common_pool_size>8</background_common_pool_size>
+        <background_buffer_flush_schedule_pool_size>16</background_buffer_flush_schedule_pool_size>
+        <mark_cache_size>5368709120</mark_cache_size>
+        <uncompressed_cache_size>8589934592</uncompressed_cache_size>
+        <remote_servers>
+            <clif_cluster>
+                <shard>
+                    <internal_replication>true</internal_replication>
+                    <replica>
+                        <host>clickhouse-0.clickhouse-headless.clif.svc.cluster.local</host>
+                        <port>9000</port>
+                    </replica>
+                    <replica>
+                        <host>clickhouse-1.clickhouse-headless.clif.svc.cluster.local</host>
+                        <port>9000</port>
+                    </replica>
+                </shard>
+            </clif_cluster>
+        </remote_servers>
+        <zookeeper>
+            <node>
+                <host>clickhouse-keeper-0.clickhouse-keeper-headless.clif.svc.cluster.local</host>
+                <port>2181</port>
+            </node>
+            <session_timeout_ms>30000</session_timeout_ms>
+            <operation_timeout_ms>10000</operation_timeout_ms>
+        </zookeeper>
+        <macros>
+            <shard>shard_01</shard>
+            <replica>replica_01</replica>
+        </macros>
+        <distributed_ddl>
+            <path>/clickhouse/task_queue/ddl</path>
+            <pool_size>4</pool_size>
+        </distributed_ddl>
+        <prometheus>
+            <endpoint>/metrics</endpoint>
+            <port>9363</port>
+            <metrics>true</metrics>
+            <events>true</events>
+            <asynchronous_metrics>true</asynchronous_metrics>
+        </prometheus>
+    </clickhouse>
+---
+# ── Node 02 Cluster Config ───────────────────────────────────────────────────
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: clickhouse-node02-config
+  namespace: clif
+  labels:
+    app.kubernetes.io/name: clickhouse
+    app.kubernetes.io/part-of: clif-siem
+data:
+  clusters.xml: |
+    <clickhouse>
+        <listen_host>0.0.0.0</listen_host>
+        <interserver_http_port>9009</interserver_http_port>
+        <max_concurrent_queries>200</max_concurrent_queries>
+        <max_server_memory_usage_to_ram_ratio>0.8</max_server_memory_usage_to_ram_ratio>
+        <max_table_size_to_drop>0</max_table_size_to_drop>
+        <max_partition_size_to_drop>0</max_partition_size_to_drop>
+        <query_log>
+            <database>system</database>
+            <table>query_log</table>
+            <partition_by>toYYYYMM(event_date)</partition_by>
+            <flush_interval_milliseconds>7500</flush_interval_milliseconds>
+        </query_log>
+        <part_log>
+            <database>system</database>
+            <table>part_log</table>
+            <partition_by>toYYYYMM(event_date)</partition_by>
+            <flush_interval_milliseconds>7500</flush_interval_milliseconds>
+        </part_log>
+        <metric_log>
+            <database>system</database>
+            <table>metric_log</table>
+            <collect_interval_milliseconds>1000</collect_interval_milliseconds>
+        </metric_log>
+        <merge_tree>
+            <parts_to_delay_insert>300</parts_to_delay_insert>
+            <parts_to_throw_insert>600</parts_to_throw_insert>
+            <max_bytes_to_merge_at_max_space_in_pool>161061273600</max_bytes_to_merge_at_max_space_in_pool>
+            <number_of_free_entries_in_pool_to_execute_mutation>20</number_of_free_entries_in_pool_to_execute_mutation>
+            <max_suspicious_broken_parts>100</max_suspicious_broken_parts>
+        </merge_tree>
+        <background_pool_size>16</background_pool_size>
+        <background_move_pool_size>8</background_move_pool_size>
+        <background_merges_mutations_concurrency_ratio>2</background_merges_mutations_concurrency_ratio>
+        <background_schedule_pool_size>16</background_schedule_pool_size>
+        <background_fetches_pool_size>8</background_fetches_pool_size>
+        <background_common_pool_size>8</background_common_pool_size>
+        <background_buffer_flush_schedule_pool_size>16</background_buffer_flush_schedule_pool_size>
+        <mark_cache_size>5368709120</mark_cache_size>
+        <uncompressed_cache_size>8589934592</uncompressed_cache_size>
+        <remote_servers>
+            <clif_cluster>
+                <shard>
+                    <internal_replication>true</internal_replication>
+                    <replica>
+                        <host>clickhouse-0.clickhouse-headless.clif.svc.cluster.local</host>
+                        <port>9000</port>
+                    </replica>
+                    <replica>
+                        <host>clickhouse-1.clickhouse-headless.clif.svc.cluster.local</host>
+                        <port>9000</port>
+                    </replica>
+                </shard>
+            </clif_cluster>
+        </remote_servers>
+        <zookeeper>
+            <node>
+                <host>clickhouse-keeper-0.clickhouse-keeper-headless.clif.svc.cluster.local</host>
+                <port>2181</port>
+            </node>
+            <session_timeout_ms>30000</session_timeout_ms>
+            <operation_timeout_ms>10000</operation_timeout_ms>
+        </zookeeper>
+        <macros>
+            <shard>shard_01</shard>
+            <replica>replica_02</replica>
+        </macros>
+        <distributed_ddl>
+            <path>/clickhouse/task_queue/ddl</path>
+            <pool_size>4</pool_size>
+        </distributed_ddl>
+        <prometheus>
+            <endpoint>/metrics</endpoint>
+            <port>9363</port>
+            <metrics>true</metrics>
+            <events>true</events>
+            <asynchronous_metrics>true</asynchronous_metrics>
+        </prometheus>
+    </clickhouse>
+---
+# ── Users Config ──────────────────────────────────────────────────────────────
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: clickhouse-users
+  namespace: clif
+  labels:
+    app.kubernetes.io/name: clickhouse
+    app.kubernetes.io/part-of: clif-siem
+data:
+  users.xml: |
+    <clickhouse>
+        <profiles>
+            <default>
+                <max_memory_usage>10000000000</max_memory_usage>
+                <max_memory_usage_for_user>20000000000</max_memory_usage_for_user>
+                <max_execution_time>300</max_execution_time>
+                <load_balancing>random</load_balancing>
+                <max_threads>16</max_threads>
+                <max_insert_threads>8</max_insert_threads>
+                <async_insert>1</async_insert>
+                <wait_for_async_insert>0</wait_for_async_insert>
+                <async_insert_max_data_size>104857600</async_insert_max_data_size>
+                <async_insert_busy_timeout_ms>100</async_insert_busy_timeout_ms>
+                <max_result_rows>1000000</max_result_rows>
+                <max_result_bytes>1073741824</max_result_bytes>
+                <result_overflow_mode>break</result_overflow_mode>
+                <distributed_product_mode>allow</distributed_product_mode>
+                <optimize_read_in_order>1</optimize_read_in_order>
+                <compile_expressions>1</compile_expressions>
+                <min_count_to_compile_expression>3</min_count_to_compile_expression>
+                <network_compression_method>lz4</network_compression_method>
+            </default>
+            <readonly>
+                <readonly>1</readonly>
+                <max_execution_time>60</max_execution_time>
+                <max_memory_usage>5000000000</max_memory_usage>
+            </readonly>
+            <insert_only>
+                <readonly>0</readonly>
+                <max_execution_time>120</max_execution_time>
+                <max_memory_usage>8000000000</max_memory_usage>
+                <max_threads>8</max_threads>
+                <max_insert_threads>8</max_insert_threads>
+                <async_insert>1</async_insert>
+                <wait_for_async_insert>0</wait_for_async_insert>
+            </insert_only>
+        </profiles>
+        <users/>
+        <quotas>
+            <default>
+                <interval>
+                    <duration>3600</duration>
+                    <queries>0</queries>
+                    <errors>0</errors>
+                    <result_rows>0</result_rows>
+                    <read_rows>0</read_rows>
+                    <execution_time>0</execution_time>
+                </interval>
+            </default>
+        </quotas>
+    </clickhouse>
+---
+# ── Storage Policy (S3 tiered storage) ───────────────────────────────────────
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: clickhouse-storage-policy
+  namespace: clif
+  labels:
+    app.kubernetes.io/name: clickhouse
+    app.kubernetes.io/part-of: clif-siem
+data:
+  storage_policy.xml: |
+    <clickhouse>
+        <storage_configuration>
+            <disks>
+                <default>
+                    <keep_free_space_bytes>1073741824</keep_free_space_bytes>
+                </default>
+                <warm_disk>
+                    <path>/var/lib/clickhouse/warm/</path>
+                    <keep_free_space_bytes>536870912</keep_free_space_bytes>
+                </warm_disk>
+                <s3_cold>
+                    <type>s3</type>
+                    <endpoint>http://minio.clif.svc.cluster.local:9000/clif-cold-logs/clickhouse/</endpoint>
+                    <access_key_id from_env="MINIO_ROOT_USER"/>
+                    <secret_access_key from_env="MINIO_ROOT_PASSWORD"/>
+                    <use_environment_credentials>false</use_environment_credentials>
+                    <metadata_path>/var/lib/clickhouse/disks/s3_cold/</metadata_path>
+                    <skip_access_check>1</skip_access_check>
+                </s3_cold>
+            </disks>
+            <policies>
+                <clif_tiered>
+                    <volumes>
+                        <hot>
+                            <disk>default</disk>
+                        </hot>
+                        <warm>
+                            <disk>warm_disk</disk>
+                        </warm>
+                        <cold>
+                            <disk>s3_cold</disk>
+                        </cold>
+                    </volumes>
+                    <move_factor>0.1</move_factor>
+                </clif_tiered>
+            </policies>
+        </storage_configuration>
+    </clickhouse>

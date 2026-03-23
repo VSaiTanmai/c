@@ -1,0 +1,23 @@
+title: Zeek Lateral Movement via SMB
+id: zeek-smb-lateral-001
+status: production
+severity: high
+category: zeek
+description: >
+  Zeek SMB logs showing a single source IP connecting to multiple internal
+  hosts  on port 445 within a short window – typical lateral movement.
+tags:
+  - attack.t1021.002
+  - attack.lateral_movement
+detection:
+  condition: or
+  keywords:
+    - "smb lateral"
+    - "smb tree connect"
+    - "admin$ share"
+  clickhouse: |
+    SELECT countDistinct(dst_ip) > 3
+    FROM {database}.network_events
+    WHERE toString(src_ip) = '{source_ip}'
+      AND dst_port = 445
+      AND timestamp >= now() - INTERVAL {window_minutes} MINUTE

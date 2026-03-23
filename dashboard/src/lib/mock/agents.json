@@ -1,0 +1,70 @@
+{
+  "agents": [
+    {
+      "id": "triage",
+      "name": "Triage Agent",
+      "status": "Active",
+      "description": "Initial alert classification and priority assignment",
+      "casesProcessed": 142,
+      "accuracy": 94.2,
+      "avgResponseTime": "1.2s",
+      "lastAction": "Classified Alert #1089 as lateral-movement (confidence: 0.96)",
+      "lastActionTime": "2026-02-11T10:58:00Z"
+    },
+    {
+      "id": "hunter",
+      "name": "Hunter Agent",
+      "status": "Processing",
+      "description": "Deep-dive investigation following attack trails",
+      "casesProcessed": 38,
+      "accuracy": 91.5,
+      "avgResponseTime": "12.4s",
+      "lastAction": "Tracing lateral movement path from C102 → DC01 (3 hops found)",
+      "lastActionTime": "2026-02-11T10:57:00Z"
+    },
+    {
+      "id": "verifier",
+      "name": "Verifier Agent",
+      "status": "Idle",
+      "description": "Validates findings against known false positive patterns",
+      "casesProcessed": 85,
+      "accuracy": 97.1,
+      "avgResponseTime": "3.8s",
+      "lastAction": "Confirmed INV-2026-001 as true positive — no FP patterns matched",
+      "lastActionTime": "2026-02-11T10:45:00Z"
+    }
+  ],
+  "recentActivity": [
+    {
+      "timestamp": "2026-02-11T10:58:00Z",
+      "agent": "Triage Agent",
+      "action": "Analyzed Alert #1089: Multiple failed Kerberos TGT requests from C4521 targeting 8 accounts, classified as credential-access/T1110 with confidence 0.96. Forwarded to Hunter Agent."
+    },
+    {
+      "timestamp": "2026-02-11T10:57:00Z",
+      "agent": "Hunter Agent",
+      "action": "Investigating INV-2026-001: Traced authentication chain C102 → C4501 (Kerberos/Interactive) → C892 (NTLM/Network) → DC01 (Kerberos/TGS). 3-hop lateral movement confirmed. Temporal window: 4 minutes 23 seconds."
+    },
+    {
+      "timestamp": "2026-02-11T10:45:00Z",
+      "agent": "Verifier Agent",
+      "action": "Cross-referenced INV-2026-001 against 847 historical FP patterns. No match found. Authentication chain timing and target selection inconsistent with legitimate administrative patterns. Verified as true positive."
+    },
+    {
+      "timestamp": "2026-02-11T10:15:00Z",
+      "agent": "Triage Agent",
+      "action": "Analyzed 12 new alerts in batch. 9 classified as Info/Low (routine service account activity), 2 classified as Medium (unusual logon times), 1 classified as High (new scheduled task on production server). Medium/High forwarded for investigation."
+    }
+  ],
+  "pendingApprovals": [
+    {
+      "id": "APR-001",
+      "agent": "Hunter Agent",
+      "action": "Isolate host C1923 from network",
+      "reason": "Active DNS tunneling exfiltration detected — 234 events, estimated 52KB data exfiltrated",
+      "investigation": "INV-2026-003",
+      "severity": 4,
+      "created": "2026-02-11T10:53:00Z"
+    }
+  ]
+}

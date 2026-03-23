@@ -1,0 +1,16 @@
+{
+  "templates": [
+    {"id": "incident", "name": "Incident Report", "description": "Full investigation timeline with evidence chain and blockchain anchors", "icon": "FileWarning"},
+    {"id": "executive", "name": "Executive Summary", "description": "High-level briefing for leadership with key metrics and risk assessment", "icon": "Briefcase"},
+    {"id": "technical", "name": "Technical Analysis", "description": "Deep-dive forensic analysis with IOCs, TTPs, and remediation steps", "icon": "Code"},
+    {"id": "compliance", "name": "Compliance Report", "description": "Regulatory requirement documentation with audit trail verification", "icon": "Shield"},
+    {"id": "threat-intel", "name": "Threat Intelligence", "description": "Pattern analysis, IOC sharing format, and threat landscape summary", "icon": "Radar"}
+  ],
+  "history": [
+    {"id": "RPT-2026-015", "title": "INV-2026-004 — Mimikatz Technical Analysis", "template": "Technical Analysis", "created": "2026-02-10T11:00:00Z", "status": "Complete", "pages": 4, "size": "842 KB"},
+    {"id": "RPT-2026-014", "title": "Weekly Security Summary — Feb 3-9", "template": "Executive Summary", "created": "2026-02-10T08:00:00Z", "status": "Complete", "pages": 2, "size": "312 KB"},
+    {"id": "RPT-2026-013", "title": "INV-2026-005 — Brute Force Incident Report", "template": "Incident Report", "created": "2026-02-09T15:00:00Z", "status": "Complete", "pages": 6, "size": "1.2 MB"},
+    {"id": "RPT-2026-012", "title": "SOC2 Compliance — January 2026", "template": "Compliance Report", "created": "2026-02-01T09:00:00Z", "status": "Complete", "pages": 12, "size": "2.4 MB"},
+    {"id": "RPT-2026-011", "title": "Threat Landscape — Q4 2025", "template": "Threat Intelligence", "created": "2026-01-15T10:00:00Z", "status": "Complete", "pages": 8, "size": "1.8 MB"}
+  ]
+}

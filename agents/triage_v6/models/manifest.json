@@ -1,0 +1,98 @@
+{
+  "version": "v6.0.0",
+  "trained_at": "2026-03-05T21:21:49Z",
+  "v6_changes": {
+    "template_rarity": "REMOVED from features \u2014 unreliable in production (Drain3 state-dependent)",
+    "feature_count": "19 (was 20)",
+    "event_freq_1m": "Production formula (60/duration_sec) for network, 0 for non-network",
+    "kdd_features": "NSL-KDD native; others use ConnectionTracker simulation",
+    "severity_numeric": "Discrete int 0-4 matching production _map_severity()",
+    "dns_exfil": "Treated as NON-NETWORK (matching raw-logs routing in Vector)",
+    "protocol": "Properly mapped from dataset columns (no more hardcoded 6)"
+  },
+  "lgbm": {
+    "active": "v3.0.0",
+    "file": "lgbm_v6.0.0.onnx",
+    "metrics": {
+      "accuracy": 0.9458,
+      "precision": 0.9848,
+      "recall": 0.9117,
+      "f1": 0.9469
+    },
+    "best_iteration": 1000
+  },
+  "eif": {
+    "active": "v3.0.0",
+    "file": "eif_v6.0.0.pkl",
+    "calibration": {
+      "mean": 0.398321,
+      "std": 0.058036
+    },
+    "threshold": 0.7452,
+    "discrimination_delta": -0.1624
+  },
+  "arf": {
+    "active": "v3.0.0",
+    "file": "arf_v6.0.0.pkl",
+    "stream_csv": "features_arf_stream_features.csv"
+  },
+  "thresholds": {
+    "suspicious": 0.39,
+    "anomalous": 0.92
+  },
+  "datasets": [
+    "cicids2017",
+    "nsl_kdd",
+    "unsw_nb15",
+    "nf_unsw_nb15_v3",
+    "nf_ton_iot",
+    "csic_2010",
+    "evtx",
+    "loghub_linux",
+    "loghub_apache",
+    "dns_exfil",
+    "openssh",
+    "hdfs"
+  ],
+  "dataset_fingerprints": {
+    "load_cicids2017": "da49da2ce2c2",
+    "load_nsl_kdd": "e9aabc146e19",
+    "load_unsw_nb15": "2ad52349ca2d",
+    "load_nf_unsw": "8bb44021ca69",
+    "load_ton_iot": "ecdf02181e23",
+    "load_csic2010": "0e07c05e945e",
+    "load_evtx": "b825be08a200",
+    "load_loghub_linux": "7ebd78fa840f",
+    "load_loghub_apache": "e6d5a2c1979b",
+    "load_dns_exfil": "d09ee296ad49",
+    "load_openssh": "2e1f6f3ccb5b",
+    "load_hdfs": "84fb3d009a90"
+  },
+  "feature_cols": [
+    "hour_of_day",
+    "day_of_week",
+    "severity_numeric",
+    "source_type_numeric",
+    "src_bytes",
+    "dst_bytes",
+    "event_freq_1m",
+    "protocol",
+    "dst_port",
+    "threat_intel_flag",
+    "duration",
+    "same_srv_rate",
+    "diff_srv_rate",
+    "serror_rate",
+    "rerror_rate",
+    "count",
+    "srv_count",
+    "dst_host_count",
+    "dst_host_srv_count"
+  ],
+  "label_leakage_prevention": {
+    "severity_source": "original_log_level (source-system severity, not Vector classification)",
+    "network_datasets_severity": "random discrete 0-4 \u2014 no inherent severity",
+    "log_datasets_severity": "content-keyword-based with noise, discretized to int 0-4",
+    "template_rarity": "Drain3-aligned beta distributions (NOT label-dependent formula)"
+  }
+}

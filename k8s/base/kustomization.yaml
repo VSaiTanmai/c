@@ -1,0 +1,79 @@
+# =============================================================================
+# CLIF SIEM — Kustomize Base
+# =============================================================================
+# Production-grade Kubernetes deployment for the Cognitive Log Investigation
+# Framework (CLIF). Designed for SIH1733 Smart India Hackathon.
+#
+# Usage:
+#   kubectl kustomize k8s/base/                        # Preview
+#   kubectl apply -k k8s/base/                         # Deploy base
+#   kubectl apply -k k8s/overlays/development/         # Dev overlay
+#   kubectl apply -k k8s/overlays/production/          # Prod overlay
+# =============================================================================
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: clif
+
+labels:
+  - pairs:
+      app.kubernetes.io/managed-by: kustomize
+      app.kubernetes.io/part-of: clif-siem
+    includeSelectors: false
+
+# ── Resources (ordered by dependency) ─────────────────────────────────────────
+resources:
+  # Namespace
+  - namespace.yaml
+
+  # RBAC
+  - rbac.yaml
+
+  # Secrets
+  - secrets/credentials.yaml
+
+  # ConfigMaps (inline)
+  - configmaps/redpanda-console.yaml
+  - configmaps/prometheus.yaml
+  - configmaps/grafana.yaml
+  - configmaps/clickhouse.yaml
+
+  # Network Policies
+  - network-policy.yaml
+
+  # PVCs (model storage)
+  - pvcs/triage-models.yaml
+
+  # Services (headless must exist before StatefulSets)
+  - services/headless.yaml
+  - services/application.yaml
+
+  # StatefulSets (data tier — start first)
+  - statefulsets/redpanda.yaml
+  - statefulsets/clickhouse-keeper.yaml
+  - statefulsets/clickhouse.yaml
+  - statefulsets/minio-lancedb.yaml
+
+  # Init Jobs (depend on StatefulSets being ready)
+  - jobs/init-jobs.yaml
+
+  # Deployments (compute tier)
+  - deployments/consumer.yaml
+  - deployments/vector.yaml
+  - deployments/triage-agent.yaml
+  - deployments/agents.yaml
+  - deployments/classifier-merkle.yaml
+  - deployments/monitoring.yaml
+
+  # Autoscaling
+  - hpa.yaml
+
+# ── Large ConfigMaps (generated from source files) ────────────────────────────
+# Run `.\k8s\generate-configmaps.ps1` to create these from source files:
+#   - clickhouse-schema (schema.sql — 58KB)
+#   - vector-config (vector.yaml — 39KB)
+#   - grafana-dashboard (grafana-dashboard.json — 7KB)
+# Then uncomment:
+# - configmaps/generated/clickhouse-schema.yaml
+# - configmaps/generated/vector-config.yaml
+# - configmaps/generated/grafana-dashboard.yaml

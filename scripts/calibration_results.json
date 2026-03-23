@@ -1,0 +1,9 @@
+{
+  "n_samples": 175478,
+  "suspicious_threshold": 0.26,
+  "anomalous_threshold": 0.4,
+  "attack_recall_pct": 97.3,
+  "fn_rate_pct": 1.8,
+  "fp_rate_pct": 5.0,
+  "escalation_precision_pct": 95.7
+}

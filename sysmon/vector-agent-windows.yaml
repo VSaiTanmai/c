@@ -1,0 +1,809 @@
+# =============================================================================
+# CLIF Vector Agent — Windows Endpoint Configuration
+# =============================================================================
+#
+# Deployed on each Windows host alongside Sysmon. Reads Windows Event Log
+# (Sysmon channel) and forwards structured JSON to the central CLIF Vector
+# aggregator via HTTP.
+#
+# Install:
+#   1. Install Sysmon: sysmon64.exe -accepteula -i sysmonconfig-clif.xml
+#   2. Install Vector: msiexec /i vector-x64.msi /quiet
+#   3. Copy this file to C:\Vector\vector.yaml
+#   4. Start service: sc start vector
+#
+# Environment:
+#   CLIF_VECTOR_URL        Central Vector HTTP endpoint (default: http://clif-vector:8687)
+#   CLIF_HOSTNAME          Override hostname (default: auto-detected)
+# =============================================================================
+
+data_dir: "C:\\Vector\\data"
+
+acknowledgements:
+  enabled: true
+
+# ─── Sources ─────────────────────────────────────────────────────────────────
+
+sources:
+
+  # ── Sysmon Events (Primary) ──────────────────────────────────────────────
+  # Reads from the Sysmon Operational channel. All event IDs configured in
+  # sysmonconfig-clif.xml will appear here.
+  sysmon:
+    type: windows_event_log
+    channel: "Microsoft-Windows-Sysmon/Operational"
+    raw_event:
+      at_path: "raw_event"
+
+  # ── Windows Security Events ──────────────────────────────────────────────
+  # Login/logoff, privilege use, audit policy changes — supplements Sysmon.
+  windows_security:
+    type: windows_event_log
+    channel: "Security"
+    raw_event:
+      at_path: "raw_event"
+
+  # ── PowerShell Script Block Logging ──────────────────────────────────────
+  # Captures PowerShell script execution (enable via GPO: ScriptBlockLogging)
+  powershell:
+    type: windows_event_log
+    channel: "Microsoft-Windows-PowerShell/Operational"
+    raw_event:
+      at_path: "raw_event"
+
+# ─── Transforms ──────────────────────────────────────────────────────────────
+
+transforms:
+
+  # ── Parse Sysmon → CLIF Common Schema ────────────────────────────────────
+  parse_sysmon:
+    type: remap
+    inputs:
+      - "sysmon"
+    source: |
+      # Extract Sysmon Event ID
+      eid = to_int(.event_id) ?? 0
+      .sysmon_event_id = eid
+
+      # Common fields
+      .source = "sysmon"
+      .hostname = to_string(.computer) ?? ""
+      .level = "INFO"
+
+      # Access event data (Sysmon stores fields in .data or .event_data)
+      d = if exists(.event_data) { .event_data } else if exists(.data) { .data } else { {} }
+
+      # ── Event ID 1: Process Create ──────────────────────────────────────
+      if eid == 1 {
+        .clif_event_type = "process"
+        .pid = to_int(d.ProcessId) ?? 0
+        .ppid = to_int(d.ParentProcessId) ?? 0
+        .uid = 0
+        .gid = 0
+        .binary_path = to_string(d.Image) ?? ""
+        .arguments = to_string(d.CommandLine) ?? ""
+        .cwd = to_string(d.CurrentDirectory) ?? ""
+        .exit_code = -1
+        .syscall = "CreateProcess"
+        .user_id = to_string(d.User) ?? ""
+
+        # Hashes (SHA256,IMPHASH format)
+        .file_hash = to_string(d.Hashes) ?? ""
+
+        # Parent info for correlation
+        .parent_binary = to_string(d.ParentImage) ?? ""
+        .parent_cmdline = to_string(d.ParentCommandLine) ?? ""
+
+        # Build rich message for LanceDB embedding
+        .message = "Process created: " + .binary_path + " " + .arguments + " (PID:" + to_string(.pid) + " PPID:" + to_string(.ppid) + " Parent:" + .parent_binary + " User:" + .user_id + ")"
+
+      # ── Event ID 2: File Creation Time Changed (Timestomping) ──────────
+      } else if eid == 2 {
+        .clif_event_type = "security"
+        .category = "defense-evasion"
+        .severity = 3
+        .mitre_tactic = "defense-evasion"
+        .mitre_technique = "T1070.006"
+        .description = "File creation time modified: " + to_string(d.TargetFilename) ?? "" + " by " + to_string(d.Image) ?? "" + " (previous: " + to_string(d.PreviousCreationUtcTime) ?? "" + " new: " + to_string(d.CreationUtcTime) ?? "" + ")"
+        .message = .description
+
+      # ── Event ID 3: Network Connection ──────────────────────────────────
+      } else if eid == 3 {
+        .clif_event_type = "network"
+        .src_ip = to_string(d.SourceIp) ?? "0.0.0.0"
+        .src_port = to_int(d.SourcePort) ?? 0
+        .dst_ip = to_string(d.DestinationIp) ?? "0.0.0.0"
+        .dst_port = to_int(d.DestinationPort) ?? 0
+        .protocol = upcase(to_string(d.Protocol) ?? "TCP")
+        .direction = if to_bool(d.Initiated) ?? true { "outbound" } else { "inbound" }
+        .pid = to_int(d.ProcessId) ?? 0
+        .binary_path = to_string(d.Image) ?? ""
+        .user_id = to_string(d.User) ?? ""
+        .message = to_string(d.Image) ?? "" + " " + .src_ip + ":" + to_string(.src_port) + " -> " + .dst_ip + ":" + to_string(.dst_port) + " " + .protocol
+
+      # ── Event ID 5: Process Terminate ───────────────────────────────────
+      } else if eid == 5 {
+        .clif_event_type = "process"
+        .pid = to_int(d.ProcessId) ?? 0
+        .ppid = 0
+        .uid = 0
+        .gid = 0
+        .binary_path = to_string(d.Image) ?? ""
+        .arguments = ""
+        .cwd = ""
+        .exit_code = 0
+        .syscall = "TerminateProcess"
+        .user_id = to_string(d.User) ?? ""
+        .message = "Process terminated: " + .binary_path + " (PID:" + to_string(.pid) + ")"
+
+      # ── Event ID 6: Driver Loaded ───────────────────────────────────────
+      } else if eid == 6 {
+        signed = to_string(d.Signed) ?? "true"
+        .clif_event_type = "security"
+        .category = "persistence"
+        .severity = if signed == "false" { 4 } else { 2 }
+        .mitre_tactic = "persistence"
+        .mitre_technique = "T1547.006"
+        img = to_string(d.ImageLoaded) ?? ""
+        .description = "Driver loaded: " + img + " (Signed:" + signed + " Signature:" + to_string(d.Signature) ?? "" + " Hash:" + to_string(d.Hashes) ?? "" + ")"
+        .message = .description
+
+      # ── Event ID 7: Image Loaded (DLL) ──────────────────────────────────
+      } else if eid == 7 {
+        .clif_event_type = "process"
+        .pid = to_int(d.ProcessId) ?? 0
+        .ppid = 0
+        .uid = 0
+        .gid = 0
+        .binary_path = to_string(d.Image) ?? ""
+        .arguments = "DLL_LOAD:" + to_string(d.ImageLoaded) ?? ""
+        .cwd = ""
+        .exit_code = -1
+        .syscall = "LoadLibrary"
+        signed = to_string(d.Signed) ?? "true"
+        .message = to_string(d.Image) ?? "" + " loaded DLL: " + to_string(d.ImageLoaded) ?? "" + " (Signed:" + signed + ")"
+
+        # Flag unsigned DLLs as suspicious
+        if signed == "false" {
+          .is_suspicious = 1
+          .detection_rule = "unsigned_dll_load"
+        }
+
+      # ── Event ID 8: CreateRemoteThread (Process Injection) ─────────────
+      } else if eid == 8 {
+        .clif_event_type = "security"
+        .category = "defense-evasion"
+        .severity = 4
+        .mitre_tactic = "defense-evasion"
+        .mitre_technique = "T1055"
+        src_img = to_string(d.SourceImage) ?? ""
+        tgt_img = to_string(d.TargetImage) ?? ""
+        .description = "Remote thread injection: " + src_img + " -> " + tgt_img + " (SourcePID:" + to_string(d.SourceProcessId) ?? "" + " TargetPID:" + to_string(d.TargetProcessId) ?? "" + " StartAddress:" + to_string(d.StartAddress) ?? "" + ")"
+        .message = .description
+        .ip_address = "0.0.0.0"
+
+      # ── Event ID 9: RawAccessRead ───────────────────────────────────────
+      } else if eid == 9 {
+        .clif_event_type = "security"
+        .category = "credential-access"
+        .severity = 3
+        .mitre_tactic = "credential-access"
+        .mitre_technique = "T1003"
+        .description = "Raw disk access: " + to_string(d.Image) ?? "" + " reading " + to_string(d.Device) ?? "" + " (PID:" + to_string(d.ProcessId) ?? "" + ")"
+        .message = .description
+
+      # ── Event ID 10: Process Access (LSASS) ────────────────────────────
+      } else if eid == 10 {
+        .clif_event_type = "security"
+        .category = "credential-access"
+        .severity = 4
+        .mitre_tactic = "credential-access"
+        .mitre_technique = "T1003.001"
+        src = to_string(d.SourceImage) ?? ""
+        tgt = to_string(d.TargetImage) ?? ""
+        .description = "Process access: " + src + " -> " + tgt + " (GrantedAccess:" + to_string(d.GrantedAccess) ?? "" + " CallTrace:" + to_string(d.CallTrace) ?? "" + ")"
+        .message = .description
+        .ip_address = "0.0.0.0"
+
+        # Elevate severity for LSASS access
+        tgt_lower = downcase(tgt)
+        if contains(tgt_lower, "lsass") {
+          .severity = 4
+          .description = "LSASS credential dump attempt: " + src + " accessed lsass.exe (GrantedAccess:" + to_string(d.GrantedAccess) ?? "" + ")"
+        }
+
+      # ── Event ID 11: File Create ───────────────────────────────────────
+      } else if eid == 11 {
+        .clif_event_type = "raw"
+        .level = "INFO"
+        .message = "File created: " + to_string(d.TargetFilename) ?? "" + " by " + to_string(d.Image) ?? "" + " (PID:" + to_string(d.ProcessId) ?? "" + ")"
+
+      # ── Event IDs 12-14: Registry Events ────────────────────────────────
+      } else if eid == 12 || eid == 13 || eid == 14 {
+        .clif_event_type = "security"
+        .category = "persistence"
+        .severity = 3
+        .mitre_tactic = "persistence"
+        .mitre_technique = "T1547.001"
+        evt_type = if eid == 12 { "CreateKey/DeleteKey" } else if eid == 13 { "SetValue" } else { "RenameKey" }
+        target_obj = to_string(d.TargetObject) ?? ""
+        .description = "Registry " + evt_type + ": " + target_obj + " by " + to_string(d.Image) ?? ""
+
+        # Detect high-value persistence keys
+        tgt_lower = downcase(target_obj)
+        if contains(tgt_lower, "\\run") || contains(tgt_lower, "\\runonce") {
+          .severity = 4
+          .mitre_technique = "T1547.001"
+        } else if contains(tgt_lower, "\\services\\") {
+          .mitre_technique = "T1543.003"
+        } else if contains(tgt_lower, "\\schedule\\taskcache") {
+          .mitre_technique = "T1053.005"
+        } else if contains(tgt_lower, "\\image file execution") {
+          .severity = 4
+          .mitre_tactic = "defense-evasion"
+          .mitre_technique = "T1546.012"
+        } else if contains(tgt_lower, "\\windows defender") {
+          .severity = 4
+          .mitre_tactic = "defense-evasion"
+          .mitre_technique = "T1562.001"
+        }
+        .message = .description
+
+      # ── Event ID 15: FileCreateStreamHash (ADS) ────────────────────────
+      } else if eid == 15 {
+        .clif_event_type = "security"
+        .category = "defense-evasion"
+        .severity = 3
+        .mitre_tactic = "defense-evasion"
+        .mitre_technique = "T1564.004"
+        .description = "Alternate Data Stream: " + to_string(d.TargetFilename) ?? "" + " by " + to_string(d.Image) ?? "" + " Hash:" + to_string(d.Hash) ?? ""
+        .message = .description
+
+      # ── Event IDs 17-18: Named Pipe Events ─────────────────────────────
+      } else if eid == 17 || eid == 18 {
+        pipe_op = if eid == 17 { "created" } else { "connected" }
+        pipe_name = to_string(d.PipeName) ?? ""
+        .clif_event_type = "raw"
+        .level = "WARNING"
+        .message = "Named pipe " + pipe_op + ": " + pipe_name + " by " + to_string(d.Image) ?? "" + " (PID:" + to_string(d.ProcessId) ?? "" + ")"
+
+        # Flag known-malicious pipe names
+        pn_lower = downcase(pipe_name)
+        if contains(pn_lower, "\\msse-") || contains(pn_lower, "\\psexesvc") || contains(pn_lower, "\\msagent_") || contains(pn_lower, "\\postex_") {
+          .clif_event_type = "security"
+          .category = "command-and-control"
+          .severity = 4
+          .mitre_tactic = "command-and-control"
+          .mitre_technique = "T1570"
+          .description = "Suspicious named pipe " + pipe_op + ": " + pipe_name + " by " + to_string(d.Image) ?? ""
+          .message = .description
+        }
+
+      # ── Event ID 22: DNS Query ──────────────────────────────────────────
+      } else if eid == 22 {
+        .clif_event_type = "network"
+        qname = to_string(d.QueryName) ?? ""
+        .dns_query = qname
+        .dst_ip = to_string(d.QueryResults) ?? "0.0.0.0"
+        .src_ip = "0.0.0.0"
+        .src_port = 0
+        .dst_port = 53
+        .protocol = "DNS"
+        .direction = "outbound"
+        .pid = to_int(d.ProcessId) ?? 0
+        .binary_path = to_string(d.Image) ?? ""
+        qstatus = to_string(d.QueryStatus) ?? "0"
+        .message = to_string(d.Image) ?? "" + " DNS query: " + qname + " (status:" + qstatus + " result:" + .dst_ip + ")"
+
+      # ── Event IDs 23, 26: File Delete ───────────────────────────────────
+      } else if eid == 23 || eid == 26 {
+        .clif_event_type = "raw"
+        .level = "WARNING"
+        archived = if eid == 23 { " [archived]" } else { "" }
+        .message = "File deleted" + archived + ": " + to_string(d.TargetFilename) ?? "" + " by " + to_string(d.Image) ?? "" + " (PID:" + to_string(d.ProcessId) ?? "" + " Hash:" + to_string(d.Hashes) ?? "" + ")"
+
+      # ── Event ID 24: Clipboard Change ───────────────────────────────────
+      } else if eid == 24 {
+        .clif_event_type = "security"
+        .category = "collection"
+        .severity = 3
+        .mitre_tactic = "collection"
+        .mitre_technique = "T1115"
+        .description = "Clipboard accessed by: " + to_string(d.Image) ?? "" + " (PID:" + to_string(d.ProcessId) ?? "" + ")"
+        .message = .description
+
+      # ── Event ID 25: Process Tampering ──────────────────────────────────
+      } else if eid == 25 {
+        .clif_event_type = "security"
+        .category = "defense-evasion"
+        .severity = 4
+        .mitre_tactic = "defense-evasion"
+        .mitre_technique = "T1055.012"
+        tamper_type = to_string(d.Type) ?? "Unknown"
+        .description = "Process tampering detected (" + tamper_type + "): " + to_string(d.Image) ?? "" + " (PID:" + to_string(d.ProcessId) ?? "" + ")"
+        .message = .description
+
+      # ── Unknown/Future Event IDs ────────────────────────────────────────
+      } else {
+        .clif_event_type = "raw"
+        .level = "INFO"
+        .message = "Sysmon EventID " + to_string(eid) + ": " + encode_json(d)
+      }
+
+      # ── Enrich metadata for all events ──────────────────────────────────
+      .metadata = {}
+      .metadata.sysmon_event_id = to_string(eid)
+      .metadata.original_source_type = "sysmon"
+      if exists(.user_id) { .metadata.user_id = to_string!(.user_id) }
+      if exists(.file_hash) { .metadata.file_hash = to_string!(.file_hash) }
+      if exists(.parent_binary) { .metadata.parent_binary = to_string!(.parent_binary) }
+      if exists(.parent_cmdline) { .metadata.parent_cmdline = to_string!(.parent_cmdline) }
+
+  # ── Parse Windows Security Log ───────────────────────────────────────────
+  parse_windows_security:
+    type: remap
+    inputs:
+      - "windows_security"
+    source: |
+      eid = to_int(.event_id) ?? 0
+      .source = "windows-security"
+      .hostname = to_string(.computer) ?? ""
+      d = if exists(.event_data) { .event_data } else if exists(.data) { .data } else { {} }
+
+      # ── 4624/4625: Logon Success/Failure ─────────────────────────────
+      if eid == 4624 {
+        .clif_event_type = "security"
+        .category = "auth"
+        .severity = 1
+        .mitre_tactic = "initial-access"
+        .mitre_technique = "T1078"
+        logon_type = to_string(d.LogonType) ?? "?"
+        .user_id = to_string(d.TargetUserName) ?? ""
+        .ip_address = to_string(d.IpAddress) ?? "0.0.0.0"
+        .description = "Logon success: " + .user_id + " (LogonType:" + logon_type + " IP:" + .ip_address + " Domain:" + to_string(d.TargetDomainName) ?? "" + ")"
+        .message = .description
+        .metadata = { "sysmon_event_id": "4624", "logon_type": logon_type, "original_source_type": "windows-security" }
+
+      } else if eid == 4625 {
+        .clif_event_type = "security"
+        .category = "auth"
+        .severity = 3
+        .mitre_tactic = "credential-access"
+        .mitre_technique = "T1110"
+        .user_id = to_string(d.TargetUserName) ?? ""
+        .ip_address = to_string(d.IpAddress) ?? "0.0.0.0"
+        fail_reason = to_string(d.FailureReason) ?? to_string(d.Status) ?? "unknown"
+        .description = "Logon failure: " + .user_id + " (IP:" + .ip_address + " Reason:" + fail_reason + " SubStatus:" + to_string(d.SubStatus) ?? "" + ")"
+        .message = .description
+        .metadata = { "sysmon_event_id": "4625", "original_source_type": "windows-security" }
+
+      # ── 4648: Explicit Credential Logon (RunAs, RDP) ────────────────
+      } else if eid == 4648 {
+        .clif_event_type = "security"
+        .category = "credential-access"
+        .severity = 2
+        .mitre_tactic = "credential-access"
+        .mitre_technique = "T1078.002"
+        .user_id = to_string(d.SubjectUserName) ?? ""
+        target_user = to_string(d.TargetUserName) ?? ""
+        target_server = to_string(d.TargetServerName) ?? ""
+        .description = "Explicit credential logon: " + .user_id + " -> " + target_user + "@" + target_server + " via " + to_string(d.ProcessName) ?? ""
+        .message = .description
+        .metadata = { "sysmon_event_id": "4648", "original_source_type": "windows-security" }
+
+      # ── 4672: Special Privileges Assigned ───────────────────────────
+      } else if eid == 4672 {
+        .clif_event_type = "security"
+        .category = "privilege-escalation"
+        .severity = 2
+        .mitre_tactic = "privilege-escalation"
+        .mitre_technique = "T1134"
+        .user_id = to_string(d.SubjectUserName) ?? ""
+        .description = "Special privileges assigned to: " + .user_id + " (Privileges:" + to_string(d.PrivilegeList) ?? "" + ")"
+        .message = .description
+        .metadata = { "sysmon_event_id": "4672", "original_source_type": "windows-security" }
+
+      # ── 4688: Process Creation (without Sysmon — fallback) ──────────
+      } else if eid == 4688 {
+        .clif_event_type = "process"
+        .pid = to_int(d.NewProcessId) ?? 0
+        .ppid = to_int(d.ProcessId) ?? 0
+        .uid = 0
+        .gid = 0
+        .binary_path = to_string(d.NewProcessName) ?? ""
+        .arguments = to_string(d.CommandLine) ?? ""
+        .cwd = ""
+        .exit_code = -1
+        .syscall = "CreateProcess"
+        .user_id = to_string(d.SubjectUserName) ?? ""
+        .message = "Process created (4688): " + .binary_path + " " + .arguments
+        .metadata = { "sysmon_event_id": "4688", "original_source_type": "windows-security" }
+
+      # ── 4720/4726: Account Created/Deleted ──────────────────────────
+      } else if eid == 4720 || eid == 4726 {
+        action = if eid == 4720 { "created" } else { "deleted" }
+        .clif_event_type = "security"
+        .category = "persistence"
+        .severity = 3
+        .mitre_tactic = "persistence"
+        .mitre_technique = "T1136.001"
+        .user_id = to_string(d.SubjectUserName) ?? ""
+        target = to_string(d.TargetUserName) ?? ""
+        .description = "Account " + action + ": " + target + " by " + .user_id
+        .message = .description
+        .metadata = { "sysmon_event_id": to_string(eid), "original_source_type": "windows-security" }
+
+      # ── 4732/4733: User added/removed from security group ──────────
+      } else if eid == 4732 || eid == 4733 {
+        action = if eid == 4732 { "added to" } else { "removed from" }
+        .clif_event_type = "security"
+        .category = "privilege-escalation"
+        .severity = 3
+        .mitre_tactic = "privilege-escalation"
+        .mitre_technique = "T1098"
+        .user_id = to_string(d.SubjectUserName) ?? ""
+        member = to_string(d.MemberName) ?? to_string(d.MemberSid) ?? ""
+        group = to_string(d.TargetUserName) ?? ""
+        .description = "User " + member + " " + action + " group: " + group + " by " + .user_id
+        .message = .description
+        .metadata = { "sysmon_event_id": to_string(eid), "original_source_type": "windows-security" }
+
+      # ── 1102: Audit Log Cleared ─────────────────────────────────────
+      } else if eid == 1102 {
+        .clif_event_type = "security"
+        .category = "defense-evasion"
+        .severity = 4
+        .mitre_tactic = "defense-evasion"
+        .mitre_technique = "T1070.001"
+        .description = "Security audit log cleared by " + to_string(d.SubjectUserName) ?? "SYSTEM"
+        .message = .description
+        .metadata = { "sysmon_event_id": "1102", "original_source_type": "windows-security" }
+
+      # ── All other Security events → raw_logs ────────────────────────
+      } else {
+        .clif_event_type = "raw"
+        .level = "INFO"
+        .message = "Windows Security EventID " + to_string(eid) + ": " + encode_json(d)
+        .metadata = { "sysmon_event_id": to_string(eid), "original_source_type": "windows-security" }
+      }
+
+  # ── Parse PowerShell Events ──────────────────────────────────────────────
+  parse_powershell:
+    type: remap
+    inputs:
+      - "powershell"
+    source: |
+      eid = to_int(.event_id) ?? 0
+      .source = "powershell"
+      .hostname = to_string(.computer) ?? ""
+      d = if exists(.event_data) { .event_data } else if exists(.data) { .data } else { {} }
+
+      # ── 4104: Script Block Logging ──────────────────────────────────
+      if eid == 4104 {
+        script = to_string(d.ScriptBlockText) ?? ""
+        script_lower = downcase(script)
+        .message = "PowerShell script block: " + script
+
+        # Detect suspicious PowerShell patterns
+        is_suspicious = false
+        technique = "T1059.001"
+        if contains(script_lower, "invoke-mimikatz") || contains(script_lower, "sekurlsa") {
+          is_suspicious = true
+          technique = "T1003.001"
+        } else if contains(script_lower, "invoke-expression") || contains(script_lower, "iex(") || contains(script_lower, "iex (") {
+          is_suspicious = true
+        } else if contains(script_lower, "downloadstring") || contains(script_lower, "downloadfile") || contains(script_lower, "webclient") || contains(script_lower, "invoke-webrequest") {
+          is_suspicious = true
+          technique = "T1105"
+        } else if contains(script_lower, "-enc") || contains(script_lower, "encodedcommand") || contains(script_lower, "frombase64") {
+          is_suspicious = true
+        } else if contains(script_lower, "bypass") && contains(script_lower, "executionpolicy") {
+          is_suspicious = true
+          technique = "T1562.001"
+        } else if contains(script_lower, "add-type") && contains(script_lower, "dllimport") {
+          is_suspicious = true
+          technique = "T1106"
+        } else if contains(script_lower, "invoke-shellcode") || contains(script_lower, "virtualalloc") || contains(script_lower, "createthread") {
+          is_suspicious = true
+          technique = "T1055"
+        }
+
+        if is_suspicious {
+          .clif_event_type = "security"
+          .category = "execution"
+          .severity = 4
+          .mitre_tactic = "execution"
+          .mitre_technique = technique
+          .description = .message
+        } else {
+          .clif_event_type = "raw"
+          .level = "INFO"
+        }
+        .metadata = { "sysmon_event_id": "4104", "original_source_type": "powershell" }
+
+      # ── 4103: Module Logging ────────────────────────────────────────
+      } else if eid == 4103 {
+        .clif_event_type = "raw"
+        .level = "INFO"
+        .message = "PowerShell module: " + to_string(d.Payload) ?? encode_json(d)
+        .metadata = { "sysmon_event_id": "4103", "original_source_type": "powershell" }
+
+      } else {
+        .clif_event_type = "raw"
+        .level = "INFO"
+        .message = "PowerShell EventID " + to_string(eid) + ": " + encode_json(d)
+        .metadata = { "sysmon_event_id": to_string(eid), "original_source_type": "powershell" }
+      }
+
+  # ── Suspicious Process Detection (Sysmon EID 1 enrichment) ──────────────
+  # Applied on top of parse_sysmon output for process events only.
+  detect_suspicious_processes:
+    type: remap
+    inputs:
+      - "parse_sysmon"
+    condition: '.clif_event_type == "process" && .sysmon_event_id == 1'
+    source: |
+      bp_lower = downcase(to_string!(.binary_path))
+      args_lower = downcase(to_string!(.arguments))
+      parent_lower = downcase(to_string(.parent_binary) ?? "")
+
+      .is_suspicious = 0
+      .detection_rule = ""
+
+      # ── LOLBins (Living Off The Land Binaries) ──────────────────────
+      lolbins = ["certutil.exe", "mshta.exe", "regsvr32.exe", "rundll32.exe",
+                 "wscript.exe", "cscript.exe", "msbuild.exe", "installutil.exe",
+                 "regasm.exe", "regsvcs.exe", "eventvwr.exe", "fodhelper.exe",
+                 "cmstp.exe", "msconfig.exe", "dfsvc.exe", "ieexec.exe",
+                 "control.exe", "pcalua.exe", "forfiles.exe", "bash.exe",
+                 "wsl.exe", "bitsadmin.exe", "xwizard.exe"]
+      for_each(lolbins) -> |_i, bin| {
+        if ends_with(bp_lower, bin) {
+          .is_suspicious = 1
+          .detection_rule = "lolbin_" + replace(bin, ".exe", "")
+        }
+      }
+
+      # ── Encoded PowerShell ──────────────────────────────────────────
+      if ends_with(bp_lower, "powershell.exe") || ends_with(bp_lower, "pwsh.exe") {
+        if contains(args_lower, "-enc") || contains(args_lower, "-encodedcommand") || contains(args_lower, "hidden") || contains(args_lower, "-nop") || contains(args_lower, "bypass") {
+          .is_suspicious = 1
+          .detection_rule = "suspicious_powershell"
+        }
+      }
+
+      # ── Reconnaissance commands ─────────────────────────────────────
+      recon = ["whoami", "net user", "net group", "net localgroup", "ipconfig",
+               "systeminfo", "tasklist", "netstat", "nltest", "dsquery",
+               "arp -a", "nslookup", "net share", "qprocess", "quser"]
+      for_each(recon) -> |_i, cmd| {
+        if contains(args_lower, cmd) {
+          .is_suspicious = 1
+          .detection_rule = "recon_" + replace(replace(cmd, " ", "_"), "-", "")
+        }
+      }
+
+      # ── Credential access tools ─────────────────────────────────────
+      if contains(bp_lower, "mimikatz") || contains(args_lower, "sekurlsa") ||
+         contains(bp_lower, "procdump") || contains(bp_lower, "lazagne") ||
+         (contains(bp_lower, "rundll32") && contains(args_lower, "comsvcs.dll")) {
+        .is_suspicious = 1
+        .detection_rule = "credential_dumping"
+      }
+
+      # ── Process spawned from suspicious parent ──────────────────────
+      if (ends_with(parent_lower, "winword.exe") || ends_with(parent_lower, "excel.exe") ||
+          ends_with(parent_lower, "powerpnt.exe") || ends_with(parent_lower, "outlook.exe")) &&
+         (ends_with(bp_lower, "cmd.exe") || ends_with(bp_lower, "powershell.exe") ||
+          ends_with(bp_lower, "wscript.exe") || ends_with(bp_lower, "cscript.exe") ||
+          ends_with(bp_lower, "mshta.exe")) {
+        .is_suspicious = 1
+        .detection_rule = "office_macro_spawn"
+      }
+
+      # ── Processes from temp/download directories ────────────────────
+      if contains(bp_lower, "\\temp\\") || contains(bp_lower, "\\tmp\\") ||
+         contains(bp_lower, "\\downloads\\") || contains(bp_lower, "\\users\\public\\") {
+        .is_suspicious = 1
+        .detection_rule = "exec_from_suspicious_path"
+      }
+
+      # ── Promote highly-suspicious processes to security events ──────
+      if .is_suspicious == 1 && .detection_rule != "" {
+        # Keep as process event but also flag for investigation
+        .metadata.is_suspicious = "true"
+        .metadata.detection_rule = .detection_rule
+      }
+
+  # ── Merge all parsed streams ─────────────────────────────────────────────
+  # Combine Sysmon (non-process EID1), suspicious-enriched processes,
+  # Windows Security, and PowerShell into one unified stream.
+  merge_windows:
+    type: route
+    inputs:
+      - "detect_suspicious_processes"
+      - "parse_sysmon"
+      - "parse_windows_security"
+      - "parse_powershell"
+    route:
+      security: '.clif_event_type == "security"'
+      process: '.clif_event_type == "process"'
+      network: '.clif_event_type == "network"'
+      raw: '.clif_event_type == "raw"'
+
+  # ── Format to CLIF JSON schemas and forward to central Vector ────────────
+  format_windows_security:
+    type: remap
+    inputs:
+      - "merge_windows.security"
+    source: |
+      ts = format_timestamp!(.timestamp, format: "%Y-%m-%dT%H:%M:%S%.fZ")
+      sev = to_int(.severity) ?? 0
+      cat = to_string(.category) ?? "unknown"
+      src = to_string(.source) ?? "sysmon"
+      desc = to_string(.description) ?? to_string(.message) ?? ""
+      uid = to_string(.user_id) ?? ""
+      ip = to_string(.ip_address) ?? "0.0.0.0"
+      hn = to_string(.hostname) ?? ""
+      mt = to_string(.mitre_tactic) ?? ""
+      mte = to_string(.mitre_technique) ?? ""
+      meta = if exists(.metadata) { .metadata } else { {} }
+      . = { "clif_event_type": "security", "timestamp": ts, "severity": sev, "category": cat, "source": src, "description": desc, "user_id": uid, "ip_address": ip, "hostname": hn, "mitre_tactic": mt, "mitre_technique": mte, "ai_confidence": 0.0, "ai_explanation": "", "metadata": meta }
+
+  format_windows_process:
+    type: remap
+    inputs:
+      - "merge_windows.process"
+    source: |
+      ts = format_timestamp!(.timestamp, format: "%Y-%m-%dT%H:%M:%S%.fZ")
+      hn = to_string(.hostname) ?? ""
+      p = to_int(.pid) ?? 0
+      pp = to_int(.ppid) ?? 0
+      u = to_int(.uid) ?? 0
+      g = to_int(.gid) ?? 0
+      bp = to_string(.binary_path) ?? ""
+      args = to_string(.arguments) ?? ""
+      cwd_v = to_string(.cwd) ?? ""
+      ec = to_int(.exit_code) ?? -1
+      sc = to_string(.syscall) ?? ""
+      sus = to_int(.is_suspicious) ?? 0
+      dr = to_string(.detection_rule) ?? ""
+      meta = if exists(.metadata) { .metadata } else { {} }
+      . = { "clif_event_type": "process", "timestamp": ts, "hostname": hn, "pid": p, "ppid": pp, "uid": u, "gid": g, "binary_path": bp, "arguments": args, "cwd": cwd_v, "exit_code": ec, "container_id": "", "pod_name": "", "namespace": "", "syscall": sc, "is_suspicious": sus, "detection_rule": dr, "metadata": meta }
+
+  format_windows_network:
+    type: remap
+    inputs:
+      - "merge_windows.network"
+    source: |
+      ts = format_timestamp!(.timestamp, format: "%Y-%m-%dT%H:%M:%S%.fZ")
+      hn = to_string(.hostname) ?? ""
+      si = to_string(.src_ip) ?? "0.0.0.0"
+      sp = to_int(.src_port) ?? 0
+      di = to_string(.dst_ip) ?? "0.0.0.0"
+      dp = to_int(.dst_port) ?? 0
+      proto = to_string(.protocol) ?? "TCP"
+      dir = to_string(.direction) ?? "outbound"
+      p = to_int(.pid) ?? 0
+      bp = to_string(.binary_path) ?? ""
+      dq = to_string(.dns_query) ?? ""
+      meta = if exists(.metadata) { .metadata } else { {} }
+      . = { "clif_event_type": "network", "timestamp": ts, "hostname": hn, "src_ip": si, "src_port": sp, "dst_ip": di, "dst_port": dp, "protocol": proto, "direction": dir, "bytes_sent": 0, "bytes_received": 0, "duration_ms": 0, "pid": p, "binary_path": bp, "container_id": "", "pod_name": "", "namespace": "", "dns_query": dq, "geo_country": "", "is_suspicious": 0, "detection_rule": "", "metadata": meta }
+
+  format_windows_raw:
+    type: remap
+    inputs:
+      - "merge_windows.raw"
+    source: |
+      ts = format_timestamp!(.timestamp, format: "%Y-%m-%dT%H:%M:%S%.fZ")
+      lvl = to_string(.level) ?? "INFO"
+      src = to_string(.source) ?? "sysmon"
+      msg = to_string(.message) ?? ""
+      meta = if exists(.metadata) { .metadata } else { {} }
+      . = { "clif_event_type": "raw", "timestamp": ts, "level": lvl, "source": src, "message": msg, "metadata": meta }
+
+# ─── Sinks ───────────────────────────────────────────────────────────────────
+# Forward all 4 event types to the central CLIF Vector HTTP JSON endpoint.
+# The central Vector will route them into the correct Redpanda topics.
+
+sinks:
+
+  forward_security:
+    type: http
+    inputs:
+      - "format_windows_security"
+    uri: "${CLIF_VECTOR_URL:-http://clif-vector:8687}/v1/logs"
+    method: post
+    encoding:
+      codec: json
+    compression: gzip
+    batch:
+      max_bytes: 2097152
+      max_events: 5000
+      timeout_secs: 0.5
+    buffer:
+      type: disk
+      max_size: 536870912               # 512 MB disk buffer
+      when_full: block
+    request:
+      concurrency: 4
+      rate_limit_num: 1000
+      timeout_secs: 30
+      retry_initial_backoff_secs: 1
+      retry_max_duration_secs: 60
+    acknowledgements: true
+
+  forward_process:
+    type: http
+    inputs:
+      - "format_windows_process"
+    uri: "${CLIF_VECTOR_URL:-http://clif-vector:8687}/v1/logs"
+    method: post
+    encoding:
+      codec: json
+    compression: gzip
+    batch:
+      max_bytes: 5242880
+      max_events: 10000
+      timeout_secs: 1
+    buffer:
+      type: disk
+      max_size: 1073741824
+      when_full: block
+    request:
+      concurrency: 4
+      rate_limit_num: 2000
+      timeout_secs: 30
+      retry_initial_backoff_secs: 1
+      retry_max_duration_secs: 60
+    acknowledgements: true
+
+  forward_network:
+    type: http
+    inputs:
+      - "format_windows_network"
+    uri: "${CLIF_VECTOR_URL:-http://clif-vector:8687}/v1/logs"
+    method: post
+    encoding:
+      codec: json
+    compression: gzip
+    batch:
+      max_bytes: 5242880
+      max_events: 10000
+      timeout_secs: 1
+    buffer:
+      type: disk
+      max_size: 1073741824
+      when_full: block
+    request:
+      concurrency: 4
+      rate_limit_num: 2000
+      timeout_secs: 30
+      retry_initial_backoff_secs: 1
+      retry_max_duration_secs: 60
+    acknowledgements: true
+
+  forward_raw:
+    type: http
+    inputs:
+      - "format_windows_raw"
+    uri: "${CLIF_VECTOR_URL:-http://clif-vector:8687}/v1/logs"
+    method: post
+    encoding:
+      codec: json
+    compression: gzip
+    batch:
+      max_bytes: 5242880
+      max_events: 10000
+      timeout_secs: 1
+    buffer:
+      type: disk
+      max_size: 1073741824
+      when_full: block
+    request:
+      concurrency: 4
+      rate_limit_num: 2000
+      timeout_secs: 30
+      retry_initial_backoff_secs: 1
+      retry_max_duration_secs: 60
+    acknowledgements: true

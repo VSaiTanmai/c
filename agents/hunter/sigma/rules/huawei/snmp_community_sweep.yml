@@ -1,0 +1,24 @@
+title: Huawei Device SNMP Community String Sweep
+id: huawei-snmp-001
+status: production
+severity: medium
+category: huawei
+description: >
+  Multiple SNMP GET requests with different community strings from the same
+  source – indicates an SNMP enumeration or brute-force.
+tags:
+  - attack.t1046
+  - attack.discovery
+detection:
+  condition: or
+  keywords:
+    - "snmp community"
+    - "snmp get"
+    - "community mismatch"
+  clickhouse: |
+    SELECT countDistinct(detection_rule) > 5
+    FROM {database}.network_events
+    WHERE hostname = '{hostname}'
+      AND toString(src_ip) = '{source_ip}'
+      AND detection_rule ILIKE '%snmp%'
+      AND timestamp >= now() - INTERVAL {window_minutes} MINUTE

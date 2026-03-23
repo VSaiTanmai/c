@@ -1,0 +1,14 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: redpanda-console-config
+  namespace: clif
+data:
+  config.yml: |
+    kafka:
+      brokers:
+        - redpanda-0.redpanda-headless.clif.svc.cluster.local:9092
+        - redpanda-1.redpanda-headless.clif.svc.cluster.local:9092
+        - redpanda-2.redpanda-headless.clif.svc.cluster.local:9092
+      schemaRegistry:
+        enabled: false

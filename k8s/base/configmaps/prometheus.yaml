@@ -1,0 +1,54 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: prometheus-config
+  namespace: clif
+data:
+  prometheus.yml: |
+    global:
+      scrape_interval: 15s
+      evaluation_interval: 15s
+      scrape_timeout: 10s
+      external_labels:
+        cluster: clif-siem
+        environment: kubernetes
+
+    rule_files:
+      - /etc/prometheus/alert_rules.yml
+
+    scrape_configs:
+      - job_name: clickhouse
+        static_configs:
+          - targets:
+              - clickhouse-0.clickhouse-headless.clif.svc:9363
+              - clickhouse-1.clickhouse-headless.clif.svc:9363
+        metrics_path: /metrics
+
+      - job_name: redpanda
+        static_configs:
+          - targets:
+              - redpanda-0.redpanda-headless.clif.svc:9644
+              - redpanda-1.redpanda-headless.clif.svc:9644
+              - redpanda-2.redpanda-headless.clif.svc:9644
+        metrics_path: /public_metrics
+
+      - job_name: minio
+        static_configs:
+          - targets:
+              - minio-0.minio-headless.clif.svc:9000
+        metrics_path: /minio/v2/metrics/cluster
+
+      - job_name: vector
+        static_configs:
+          - targets: ["vector.clif.svc:9598"]
+        metrics_path: /metrics
+
+      - job_name: lancedb
+        static_configs:
+          - targets: ["lancedb.clif.svc:8100"]
+        metrics_path: /stats
+        scrape_interval: 30s
+
+      - job_name: prometheus
+        static_configs:
+          - targets: ["localhost:9090"]

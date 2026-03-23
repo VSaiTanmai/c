@@ -1,0 +1,22 @@
+title: Lateral Movement Detection (T1021)
+id: clif-lateral-movement-001
+status: production
+severity: high
+category: windows_event_log
+description: >
+  Windows event-log or network evidence of lateral movement, such as
+  SMB/RDP connections to multiple internal hosts.  Maps to MITRE
+  ATT&CK T1021 – Remote Services.
+tags:
+  - attack.t1021
+  - attack.lateral_movement
+detection:
+  condition: and
+  keywords:
+    - "lateral-movement"
+  clickhouse: |
+    SELECT count() > 3
+    FROM {database}.security_events
+    WHERE hostname = '{hostname}'
+      AND mitre_tactic = 'lateral-movement'
+      AND timestamp >= now() - INTERVAL {window_minutes} MINUTE
